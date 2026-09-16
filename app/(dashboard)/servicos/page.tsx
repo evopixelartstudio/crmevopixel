@@ -1,0 +1,119 @@
+'use client';
+
+import React, { useState } from 'react';
+import { crmService } from '@/lib/services/crm-service';
+import { ServiceCategory } from '@/types/database';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Badge } from '@/components/ui/Badge';
+import {
+  Layers,
+  Plus,
+  Clock,
+  DollarSign,
+  Globe,
+  Bot,
+  Search,
+  CheckCircle2,
+} from 'lucide-react';
+
+export default function ServicosPage() {
+  const services = crmService.getServices();
+  const [selectedCategory, setSelectedCategory] = useState<string>('todos');
+
+  const categories: ('todos' | ServiceCategory)[] = [
+    'todos',
+    'WEBSITES',
+    'AUTOMAÇÃO',
+    'PRESENÇA DIGITAL',
+  ];
+
+  const filteredServices = services.filter((s) => {
+    if (selectedCategory === 'todos') return true;
+    return s.category === selectedCategory;
+  });
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* Cabeçalho */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[rgba(218,241,222,0.06)] pb-5">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-mono text-[#8EB69B] uppercase tracking-wider mb-1">
+            <Layers className="w-3.5 h-3.5" />
+            Portfólio Comercial da EvoPixel
+          </div>
+          <h1 className="text-2xl lg:text-3xl font-semibold text-[#E7ECE8] font-heading">
+            Catálogo de Serviços
+          </h1>
+          <p className="text-xs text-[#9BA6A0] mt-1">
+            Soluções estruturadas com precificação base, prazos de entrega e sinergia multisserviço.
+          </p>
+        </div>
+
+        <Button variant="primary" size="sm" className="gap-1.5">
+          <Plus className="w-3.5 h-3.5 text-[#07100F]" />
+          <span>Cadastrar Serviço</span>
+        </Button>
+      </div>
+
+      {/* Filtro por Categorias */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+        {categories.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setSelectedCategory(cat)}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-heading transition-all ${
+              selectedCategory === cat
+                ? 'bg-[#10201E] text-[#E7ECE8] border border-[rgba(218,241,222,0.12)] font-medium'
+                : 'text-[#9BA6A0] hover:text-[#E7ECE8]'
+            }`}
+          >
+            {cat === 'todos' ? 'Todos os Serviços' : cat}
+          </button>
+        ))}
+      </div>
+
+      {/* Grid de Serviços */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredServices.map((service) => (
+          <div
+            key={service.id}
+            className="p-6 rounded-2xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.16)] transition-all flex flex-col justify-between space-y-4 group shadow-sm"
+          >
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-mono text-[#8EB69B] uppercase tracking-wider">
+                  {service.category}
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-[#10201E] text-[#8EB69B] font-mono">
+                  {service.delivery_time_days} dias
+                </span>
+              </div>
+
+              <h3 className="text-base font-semibold text-[#E7ECE8] font-heading group-hover:text-[#F1F9A1] transition-colors">
+                {service.name}
+              </h3>
+
+              <p className="text-xs text-[#9BA6A0] mt-2 leading-relaxed">
+                {service.description}
+              </p>
+            </div>
+
+            <div className="pt-4 border-t border-[rgba(218,241,222,0.06)] flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-[#65706A]">A partir de</span>
+                <div className="text-base font-semibold font-mono text-[#F1F9A1]">
+                  R$ {service.base_price.toLocaleString('pt-BR')}
+                </div>
+              </div>
+
+              <Button variant="secondary" size="sm" className="text-xs h-7 px-2.5">
+                Editar
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
