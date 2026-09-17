@@ -1,16 +1,20 @@
 version: '3.8'
 
 services:
-  crm:
+  crmevopixel:
     build:
       context: .
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
-    container_name: evocrm-app
+    container_name: crmevopixel
     restart: unless-stopped
+    expose:
+      - "3000"
     ports:
+      # Porta mapeada para testes locais ou acesso direto na porta 3000.
+      # No VPS atrás do Traefik, o tráfego externo passa via HTTPS (portas 80/443 do Traefik).
       - "${PORT:-3000}:3000"
     environment:
       - NODE_ENV=production
@@ -18,10 +22,27 @@ services:
       - HOSTNAME=0.0.0.0
       - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/api/supabase-status || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 25s
+    labels:
+      - "traefik.enable=true"
+      # Roteador HTTPS com certificado SSL Let's Encrypt
+      - "traefik.http.routers.crmevopixel.rule=Host(`crmevopixel.cloud`)"
+      - "traefik.http.routers.crmevopixel.entrypoints=websecure"
+      - "traefik.http.routers.crmevopixel.tls=true"
+      - "traefik.http.routers.crmevopixel.tls.certresolver=letsencrypt"
+      # Encaminhamento do tráfego para a porta 3000 interna da aplicação
+      - "traefik.http.services.crmevopixel.loadbalancer.server.port=3000"
+      # Redirecionamento automático de HTTP (porta 80) para HTTPS (porta 443)
+      - "traefik.http.routers.crmevopixel-http.rule=Host(`crmevopixel.cloud`)"
+      - "traefik.http.routers.crmevopixel-http.entrypoints=web"
+      - "traefik.http.routers.crmevopixel-http.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+    networks:
+      - default
+      - traefik_network
 
+networks:
+  default:
+    name: crmevopixel_default
+  traefik_network:
+    name: ${TRAEFIK_NETWORK:-traefik_network}
+    external: true
