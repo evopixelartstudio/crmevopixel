@@ -274,7 +274,7 @@ export default function AssistantPage() {
                 </div>
 
                 {/* Bloco de Dados Estruturados (se houver) */}
-                {msg.result && msg.result.data && (
+                {msg.result && msg.result.data ? (
                   <div className="p-4 rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.06)] space-y-2">
                     <div className="flex items-center justify-between text-xs border-b border-[rgba(218,241,222,0.06)] pb-2 mb-2">
                       <div className="flex items-center gap-1.5 text-[11px] font-mono text-[#8EB69B]">
@@ -306,7 +306,7 @@ export default function AssistantPage() {
                       </div>
                     )}
                   </div>
-                )}
+                ) : null}
 
                 {/* Confirmação de Ação Restrita (RESTRICTED) */}
                 {msg.pendingConfirmation && (

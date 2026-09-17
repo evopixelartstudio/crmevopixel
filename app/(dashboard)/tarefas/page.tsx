@@ -106,13 +106,35 @@ export default function TarefasPage() {
       {/* Lista de Tarefas */}
       {viewMode === 'lista' && (
         <Card className="p-6 space-y-3">
-          {tasks.map((task) => {
-            const isDone = task.status === 'concluida';
-            return (
-              <div
-                key={task.id}
-                className="p-4 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.06)] hover:border-[rgba(218,241,222,0.16)] transition-all flex items-center justify-between gap-4"
+          {tasks.length === 0 ? (
+            <div className="py-12 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] flex items-center justify-center text-[#8EB69B] mx-auto mb-3">
+                <CheckSquare className="w-6 h-6" />
+              </div>
+              <h4 className="text-base font-semibold text-[#E7ECE8] font-heading">
+                Nenhuma tarefa pendente
+              </h4>
+              <p className="text-xs text-[#9BA6A0] max-w-sm mx-auto mt-1 mb-4">
+                Sua lista de tarefas está limpa. Adicione uma nova tarefa para organizar suas entregas.
+              </p>
+              <Button
+                variant="primary"
+                size="sm"
+                className="gap-1.5 text-xs mx-auto"
+                onClick={() => setIsModalOpen(true)}
               >
+                <Plus className="w-3.5 h-3.5 text-[#07100F]" />
+                <span>Criar Primeira Tarefa</span>
+              </Button>
+            </div>
+          ) : (
+            tasks.map((task) => {
+              const isDone = task.status === 'concluida';
+              return (
+                <div
+                  key={task.id}
+                  className="p-4 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.06)] hover:border-[rgba(218,241,222,0.16)] transition-all flex items-center justify-between gap-4"
+                >
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
@@ -156,7 +178,8 @@ export default function TarefasPage() {
                 </div>
               </div>
             );
-          })}
+          })
+        )}
         </Card>
       )}
 

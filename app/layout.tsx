@@ -18,6 +18,9 @@ const dmSans = DM_Sans({
 export const metadata: Metadata = {
   title: 'EVOCRM — Sistema Operacional Comercial & Operacional da EvoPixel',
   description: 'Plataforma proprietária de gestão comercial, prospecção por nicho, automação n8n e inteligência de vendas da EvoPixel.',
+  icons: {
+    icon: '/logo-icon-dark.png',
+  },
 };
 
 export default function RootLayout({

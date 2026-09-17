@@ -22,6 +22,7 @@ import {
   INITIAL_EVO_INSIGHTS,
   INITIAL_AI_COMMANDS,
   INITIAL_AI_ACTION_LOGS,
+  INITIAL_MONTHLY_CLIENTS,
 } from '@/lib/mock-data';
 import {
   Client,
@@ -48,7 +49,9 @@ import {
   AICommand,
   AIActionLog,
   AIFeedback,
+  MonthlyClient,
 } from '@/types/database';
+import { dbService } from '@/lib/supabase/db-service';
 
 
 class CrmService {
@@ -68,6 +71,7 @@ class CrmService {
   private messageLogs: MessageLog[] = [...INITIAL_MESSAGE_LOGS];
   private insights: BusinessInsight[] = [...INITIAL_INSIGHTS];
   private prospects: Prospect[] = [...INITIAL_PROSPECTS];
+  private monthlyClients: MonthlyClient[] = [...INITIAL_MONTHLY_CLIENTS];
   private businessContext: BusinessContext = { ...INITIAL_BUSINESS_CONTEXT };
   private commercialGoals: CommercialGoal = { ...INITIAL_COMMERCIAL_GOALS };
   private conversationSummaries: ConversationSummary[] = [...INITIAL_CONVERSATION_SUMMARIES];
@@ -76,72 +80,204 @@ class CrmService {
   private aiCommands: AICommand[] = [...INITIAL_AI_COMMANDS];
   private aiActionLogs: AIActionLog[] = [...INITIAL_AI_ACTION_LOGS];
   private aiFeedbacks: AIFeedback[] = [];
+  private initializedFromSupabase = false;
+  private listeners: Set<() => void> = new Set();
 
-  // Dashboard Aggregates
+  constructor() {
+    if (typeof window !== 'undefined') {
+      this.initFromSupabase();
+    }
+  }
+
+  public subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  public notify(): void {
+    this.listeners.forEach((fn) => {
+      try {
+        fn();
+      } catch (err) {
+        console.error('Erro no listener do crmService:', err);
+      }
+    });
+  }
+
+  public async initFromSupabase(force = false): Promise<void> {
+    if (this.initializedFromSupabase && !force) return;
+    try {
+      const [
+        clients,
+        monthly,
+        leads,
+        prospects,
+        opps,
+        proposals,
+        contracts,
+        projects,
+        historical,
+        tasks,
+        transactions,
+      ] = await Promise.all([
+        dbService.getClients(),
+        dbService.getMonthlyClients(),
+        dbService.getLeads(),
+        dbService.getProspects(),
+        dbService.getOpportunities(),
+        dbService.getProposals(),
+        dbService.getContracts(),
+        dbService.getProjects(),
+        dbService.getHistoricalProjects(),
+        dbService.getTasks(),
+        dbService.getTransactions(),
+      ]);
+
+      let changed = false;
+      if (clients && clients.length > 0) { this.clients = clients; changed = true; }
+      if (monthly && monthly.length > 0) { this.monthlyClients = monthly; changed = true; }
+      if (leads && leads.length > 0) { this.leads = leads; changed = true; }
+      if (prospects && prospects.length > 0) { this.prospects = prospects; changed = true; }
+      if (opps && opps.length > 0) { this.opportunities = opps; changed = true; }
+      if (proposals && proposals.length > 0) { this.proposals = proposals; changed = true; }
+      if (contracts && contracts.length > 0) { this.contracts = contracts; changed = true; }
+      if (projects && projects.length > 0) { this.projects = projects; changed = true; }
+      if (historical && historical.length > 0) { this.historicalProjects = historical; changed = true; }
+      if (tasks && tasks.length > 0) { this.tasks = tasks; changed = true; }
+      if (transactions && transactions.length > 0) { this.transactions = transactions; changed = true; }
+
+      this.initializedFromSupabase = true;
+      if (changed) {
+        this.notify();
+      }
+    } catch (err) {
+      console.warn('Carregamento inicial do Supabase ignorado ou sem conexão:', err);
+    }
+  }
+
+  // Dashboard Aggregates — Cálculos Estritamente Dinâmicos
   public getDashboardOverview() {
-    // Faturamento acumulado = soma de recebidos históricos + projetos atuais
-    const historicalReceived = this.historicalProjects.reduce((acc, p) => acc + p.amount_received, 0);
-    const activeReceived = this.transactions.filter(t => t.status === 'pago').reduce((acc, t) => acc + t.amount_received, 0);
-    const totalAccumulated = historicalReceived + activeReceived;
+    const historicalReceived = this.historicalProjects.reduce((acc, p) => acc + (p.amount_received || 0), 0);
+    const activeReceived = this.transactions
+      .filter((t) => t.status === 'pago')
+      .reduce((acc, t) => acc + (t.amount_received || 0), 0);
+    const monthlyPaidThisMonth = this.monthlyClients
+      .filter((c) => c.status === 'ativo' && c.current_month_status === 'pago')
+      .reduce((acc, c) => acc + (c.monthly_value || 0), 0);
+    const totalAccumulated = historicalReceived + activeReceived + monthlyPaidThisMonth;
 
-    const totalContractedActive = this.transactions.reduce((acc, t) => acc + t.amount_contracted, 0);
-    const totalPendingActive = this.transactions.filter(t => t.status !== 'pago').reduce((acc, t) => acc + t.amount_pending, 0);
+    const historicalPending = this.historicalProjects.reduce((acc, p) => acc + (p.amount_pending || 0), 0);
+    const activePending = this.transactions
+      .filter((t) => t.status !== 'pago')
+      .reduce((acc, t) => acc + (t.amount_pending || 0), 0);
+    const monthlyPendingThisMonth = this.monthlyClients
+      .filter((c) => c.status === 'ativo' && c.current_month_status !== 'pago')
+      .reduce((acc, c) => acc + (c.monthly_value || 0), 0);
+    const totalPending = historicalPending + activePending + monthlyPendingThisMonth;
 
-    const monthRevenue = 8800; // Receita realizada no mês corrente
-    const pipelineTotal = this.opportunities.reduce((acc, o) => acc + o.estimated_value, 0);
-    const completedProjectsCount = this.historicalProjects.length + this.projects.filter(p => p.status === 'concluido').length;
-    const ticketMedio = Math.round(totalAccumulated / (completedProjectsCount || 1));
+    // Receita realizada no mês corrente
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const currentMonthTxReceived = this.transactions
+      .filter((t) => {
+        if (t.status !== 'pago' || !t.due_date) return false;
+        const d = new Date(t.due_date);
+        return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+      })
+      .reduce((acc, t) => acc + (t.amount_received || 0), 0);
+    const monthRevenue = currentMonthTxReceived + monthlyPaidThisMonth;
 
-    const attentionItems = [
-      {
-        id: 'att-1',
-        index: '01',
+    const pipelineTotal = this.opportunities.reduce((acc, o) => acc + (o.estimated_value || 0), 0);
+    const completedProjectsCount =
+      this.historicalProjects.length + this.projects.filter((p) => p.status === 'concluido').length;
+    const ticketMedio = completedProjectsCount > 0 ? Math.round(totalAccumulated / completedProjectsCount) : 0;
+
+    // Itens de atenção gerados dinamicamente a partir dos dados reais
+    const attentionItems: {
+      id: string;
+      index: string;
+      type: string;
+      title: string;
+      target: string;
+      detail: string;
+      actionLabel: string;
+      link: string;
+    }[] = [];
+
+    // 1. Leads quentes aguardando ação
+    const hotLeads = this.leads.filter(
+      (l) => l.temperature === 'quente' && l.status !== 'convertido' && l.status !== 'desqualificado'
+    );
+    hotLeads.slice(0, 2).forEach((l) => {
+      attentionItems.push({
+        id: `att-lead-${l.id}`,
+        index: `0${attentionItems.length + 1}`,
         type: 'lead_hot',
-        title: 'Lead quente sem resposta',
-        target: 'Silva Advocacia',
-        detail: 'Última interação há 2 dias',
+        title: 'Lead quente aguardando ação',
+        target: l.company_name || l.name,
+        detail: l.segment || 'Sem interação recente',
         actionLabel: 'Abrir lead',
-        link: '/leads/lead-1',
-      },
-      {
-        id: 'att-2',
-        index: '02',
+        link: `/leads/${l.id}`,
+      });
+    });
+
+    // 2. Propostas pendentes de aceite
+    const pendingProposals = this.proposals.filter(
+      (p) => p.status === 'enviada' || p.status === 'visualizada'
+    );
+    pendingProposals.slice(0, 2).forEach((p) => {
+      attentionItems.push({
+        id: `att-prop-${p.id}`,
+        index: `0${attentionItems.length + 1}`,
         type: 'proposal_pending',
         title: 'Proposta aguardando retorno',
-        target: 'Clínica Vida',
-        detail: 'R$ 3.500',
+        target: p.company_name || p.client_name,
+        detail: `R$ ${p.total.toLocaleString('pt-BR')}`,
         actionLabel: 'Ver proposta',
         link: '/propostas',
-      },
-      {
-        id: 'att-3',
-        index: '03',
+      });
+    });
+
+    // 3. Tarefas atrasadas
+    const overdueTasks = this.tasks.filter((t) => t.status === 'atrasada');
+    overdueTasks.slice(0, 2).forEach((t) => {
+      attentionItems.push({
+        id: `att-task-${t.id}`,
+        index: `0${attentionItems.length + 1}`,
         type: 'followup_overdue',
-        title: 'Follow-up atrasado',
-        target: 'Moreira Imóveis',
-        detail: 'Cobrança de retorno agendada para ontem',
-        actionLabel: 'Resolver',
-        link: '/follow-ups',
-      },
-      {
-        id: 'att-4',
-        index: '04',
-        type: 'n8n_followup',
-        title: 'Follow-up automático disparado pela IA',
-        target: 'Contabilidade Nova Era',
-        detail: 'Nicho: Contabilidade — sem resposta em 3 dias',
-        actionLabel: 'Ver conversa',
-        link: '/leads/lead-4',
-      },
-    ];
+        title: 'Tarefa pendente / atrasada',
+        target: t.related_to || t.title,
+        detail: `Prazo: ${new Date(t.due_date).toLocaleDateString('pt-BR')}`,
+        actionLabel: 'Ver tarefa',
+        link: '/tarefas',
+      });
+    });
+
+    // 4. Mensalidades atrasadas
+    const overdueMonthly = this.monthlyClients.filter(
+      (c) => c.status === 'inadimplente' || c.current_month_status === 'atrasado'
+    );
+    overdueMonthly.slice(0, 2).forEach((c) => {
+      attentionItems.push({
+        id: `att-month-${c.id}`,
+        index: `0${attentionItems.length + 1}`,
+        type: 'payment_overdue',
+        title: 'Mensalidade atrasada',
+        target: c.company_name || c.client_name,
+        detail: `R$ ${c.monthly_value.toLocaleString('pt-BR')} — Vencimento dia ${c.billing_day}`,
+        actionLabel: 'Ver mensalistas',
+        link: '/mensalidades',
+      });
+    });
 
     return {
-      faturamentoAcumulado: 147850, // Faturamento oficial acumulado desde o início
-      recebido: 139450,
-      aReceber: 8400,
+      faturamentoAcumulado: totalAccumulated,
+      recebido: totalAccumulated,
+      aReceber: totalPending,
       receitaMes: monthRevenue,
       pipelineAtual: pipelineTotal,
-      ticketMedio: 4280,
+      ticketMedio: ticketMedio,
       attentionItems,
     };
   }
@@ -159,6 +295,8 @@ class CrmService {
     const lead = this.leads.find(l => l.id === id);
     if (lead) {
       lead.status = status;
+      dbService.updateLead(id, { status });
+      this.notify();
     }
     return lead;
   }
@@ -169,11 +307,15 @@ class CrmService {
       id: `lead-${Date.now()}`,
     };
     this.leads.unshift(newLead);
+    dbService.insertLead(newLead);
+    this.notify();
     return newLead;
   }
 
   public deleteLead(id: string): void {
     this.leads = this.leads.filter(l => l.id !== id);
+    dbService.deleteLead(id);
+    this.notify();
   }
 
   // Sequências & Nichos (Seção 18.1 & 18.2)
@@ -257,6 +399,8 @@ class CrmService {
     const opp = this.opportunities.find(o => o.id === id);
     if (opp) {
       opp.stage_slug = newStageSlug;
+      dbService.updateOpportunityStage(id, newStageSlug);
+      this.notify();
     }
     return opp;
   }
@@ -267,7 +411,15 @@ class CrmService {
       id: `opp-${Date.now()}`,
     };
     this.opportunities.unshift(newOpp);
+    dbService.insertOpportunity(newOpp);
+    this.notify();
     return newOpp;
+  }
+
+  public deleteOpportunity(id: string): void {
+    this.opportunities = this.opportunities.filter(o => o.id !== id);
+    dbService.deleteOpportunity(id);
+    this.notify();
   }
 
   // Serviços
@@ -299,7 +451,25 @@ class CrmService {
       id: `cli-${Date.now()}`,
     };
     this.clients.unshift(newClient);
+    dbService.insertClient(newClient);
+    this.notify();
     return newClient;
+  }
+
+  public updateClient(id: string, data: Partial<Client>): Client | undefined {
+    const client = this.clients.find(c => c.id === id);
+    if (client) {
+      Object.assign(client, data);
+      dbService.updateClient(id, data);
+      this.notify();
+    }
+    return client;
+  }
+
+  public deleteClient(id: string): void {
+    this.clients = this.clients.filter(c => c.id !== id);
+    dbService.deleteClient(id);
+    this.notify();
   }
 
   // Propostas & Contratos
@@ -313,12 +483,24 @@ class CrmService {
       id: `prop-${Date.now()}`,
     };
     this.proposals.unshift(newProp);
+    dbService.insertProposal(newProp);
+    this.notify();
     return newProp;
   }
 
   public updateProposalStatus(id: string, status: Proposal['status']): void {
     const prop = this.proposals.find(p => p.id === id);
-    if (prop) prop.status = status;
+    if (prop) {
+      prop.status = status;
+      dbService.updateProposal(id, { status });
+      this.notify();
+    }
+  }
+
+  public deleteProposal(id: string): void {
+    this.proposals = this.proposals.filter(p => p.id !== id);
+    dbService.deleteProposal(id);
+    this.notify();
   }
 
   public getContracts(): Contract[] {
@@ -331,6 +513,8 @@ class CrmService {
       id: `cont-${Date.now()}`,
     };
     this.contracts.unshift(newContract);
+    dbService.insertContract(newContract);
+    this.notify();
     return newContract;
   }
 
@@ -401,6 +585,8 @@ class CrmService {
       id: `hist-${Date.now()}`,
     };
     this.historicalProjects.unshift(newProject);
+    dbService.insertHistoricalProject(newProject);
+    this.notify();
     return newProject;
   }
 
@@ -408,33 +594,184 @@ class CrmService {
     return this.historicalProjects;
   }
 
-  // Minha História (Seção 31)
+  // Meu Histórico (Seção 31) — Cálculos Dinâmicos
   public getMinhaHistoriaData() {
     const allProjectsCount = this.historicalProjects.length + this.projects.length;
-    const clientsCount = this.clients.length + 8; // Inclui clientes históricos atendidos
-    const totalContracted = 156250;
-    const totalReceived = 147850;
-    const totalPending = 8400;
+    const clientsCount = this.clients.length;
+    const totalContracted =
+      this.historicalProjects.reduce((acc, p) => acc + (p.amount_contracted || 0), 0) +
+      this.transactions.reduce((acc, t) => acc + (t.amount_contracted || 0), 0);
+    const totalReceived =
+      this.historicalProjects.reduce((acc, p) => acc + (p.amount_received || 0), 0) +
+      this.transactions.filter((t) => t.status === 'pago').reduce((acc, t) => acc + (t.amount_received || 0), 0);
+    const totalPending =
+      this.historicalProjects.reduce((acc, p) => acc + (p.amount_pending || 0), 0) +
+      this.transactions.filter((t) => t.status !== 'pago').reduce((acc, t) => acc + (t.amount_pending || 0), 0);
 
-    const yearlyEvolution = [
-      { year: '2023', contracted: 24800, received: 24800, pending: 0, projects: 6 },
-      { year: '2024', contracted: 46500, received: 45200, pending: 1300, projects: 11 },
-      { year: '2025', contracted: 61800, received: 58700, pending: 3100, projects: 14 },
-      { year: '2026 (atual)', contracted: 23150, received: 19150, pending: 4000, projects: 5 },
-    ];
+    const yearlyMap: Record<string, { contracted: number; received: number; pending: number; projects: number }> = {};
+    this.historicalProjects.forEach((hp) => {
+      const yr = hp.project_date ? new Date(hp.project_date).getFullYear().toString() : `${new Date().getFullYear()}`;
+      if (!yearlyMap[yr]) yearlyMap[yr] = { contracted: 0, received: 0, pending: 0, projects: 0 };
+      yearlyMap[yr].contracted += hp.amount_contracted || 0;
+      yearlyMap[yr].received += hp.amount_received || 0;
+      yearlyMap[yr].pending += hp.amount_pending || 0;
+      yearlyMap[yr].projects += 1;
+    });
+
+    const yearlyEvolution =
+      Object.keys(yearlyMap).length > 0
+        ? Object.entries(yearlyMap).map(([year, d]) => ({ year, ...d }))
+        : [
+            { year: '2023', contracted: 0, received: 0, pending: 0, projects: 0 },
+            { year: '2024', contracted: 0, received: 0, pending: 0, projects: 0 },
+            { year: '2025', contracted: 0, received: 0, pending: 0, projects: 0 },
+            { year: '2026', contracted: 0, received: 0, pending: 0, projects: 0 },
+          ];
 
     return {
       faturamentoAcumulado: totalReceived,
       contratadoAcumulado: totalContracted,
       pendenteAcumulado: totalPending,
-      projetosRealizados: allProjectsCount + 12,
+      projetosRealizados: allProjectsCount,
       clientesAtendidos: clientsCount,
-      ticketMedio: 4280,
-      melhorAno: '2025 (R$ 58.700)',
-      melhorMes: 'Outubro 2025 (R$ 14.200)',
-      servicoMaisRentavel: 'Site Institucional + Automação',
-      clienteMaisValioso: 'Alcantara Cirurgia Plástica (R$ 16.800)',
+      ticketMedio: allProjectsCount > 0 ? Math.round(totalReceived / allProjectsCount) : 0,
+      melhorAno: Object.keys(yearlyMap).length > 0 ? Object.keys(yearlyMap)[0] : '—',
+      melhorMes: '—',
+      servicoMaisRentavel: this.services.length > 0 ? this.services[0].name : '—',
+      clienteMaisValioso: this.clients.length > 0 ? this.clients[0].company_name : '—',
       yearlyEvolution,
+    };
+  }
+
+  // Evolução Mensal do Faturamento (12 meses do ano corrente)
+  public getMonthlyEvolution() {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonthIdx = now.getMonth();
+
+    const months = [
+      { key: 0, label: 'Jan', fullName: 'Janeiro' },
+      { key: 1, label: 'Fev', fullName: 'Fevereiro' },
+      { key: 2, label: 'Mar', fullName: 'Março' },
+      { key: 3, label: 'Abr', fullName: 'Abril' },
+      { key: 4, label: 'Mai', fullName: 'Maio' },
+      { key: 5, label: 'Jun', fullName: 'Junho' },
+      { key: 6, label: 'Jul', fullName: 'Julho' },
+      { key: 7, label: 'Ago', fullName: 'Agosto' },
+      { key: 8, label: 'Set', fullName: 'Setembro' },
+      { key: 9, label: 'Out', fullName: 'Outubro' },
+      { key: 10, label: 'Nov', fullName: 'Novembro' },
+      { key: 11, label: 'Dez', fullName: 'Dezembro' },
+    ];
+
+    const activeMRR = this.monthlyClients
+      .filter((c) => c.status === 'ativo')
+      .reduce((acc, c) => acc + (c.monthly_value || 0), 0);
+
+    return months.map((m) => {
+      // Transações pagas do mês
+      const txRevenue = this.transactions
+        .filter((t) => {
+          if (t.status !== 'pago') return false;
+          const d = new Date(t.due_date);
+          return d.getFullYear() === currentYear && d.getMonth() === m.key;
+        })
+        .reduce((acc, t) => acc + (t.amount_received || 0), 0);
+
+      // Histórico do mês
+      const histRevenue = this.historicalProjects
+        .filter((hp) => {
+          if (!hp.project_date) return false;
+          const d = new Date(hp.project_date);
+          return d.getFullYear() === currentYear && d.getMonth() === m.key;
+        })
+        .reduce((acc, hp) => acc + (hp.amount_received || 0), 0);
+
+      // Mensalistas do mês
+      const monthlyRevenue = m.key <= currentMonthIdx ? activeMRR : 0;
+      const total = txRevenue + histRevenue + monthlyRevenue;
+
+      return {
+        month: m.label,
+        fullName: m.fullName,
+        value: total,
+        isCurrent: m.key === currentMonthIdx,
+      };
+    });
+  }
+
+  // Clientes Mensalistas / Recorrência (MRR)
+  public getMonthlyClients(): MonthlyClient[] {
+    return this.monthlyClients;
+  }
+
+  public getMonthlyClientById(id: string): MonthlyClient | undefined {
+    return this.monthlyClients.find((c) => c.id === id);
+  }
+
+  public addMonthlyClient(data: Omit<MonthlyClient, 'id'>): MonthlyClient {
+    const newClient: MonthlyClient = {
+      ...data,
+      id: `mth-${Date.now()}`,
+    };
+    this.monthlyClients.unshift(newClient);
+    dbService.insertMonthlyClient(newClient);
+    this.notify();
+    return newClient;
+  }
+
+  public updateMonthlyClient(id: string, data: Partial<MonthlyClient>): MonthlyClient | undefined {
+    const client = this.monthlyClients.find((c) => c.id === id);
+    if (client) {
+      Object.assign(client, data);
+      dbService.updateMonthlyClient(id, data);
+      this.notify();
+    }
+    return client;
+  }
+
+  public deleteMonthlyClient(id: string): void {
+    this.monthlyClients = this.monthlyClients.filter((c) => c.id !== id);
+    dbService.deleteMonthlyClient(id);
+    this.notify();
+  }
+
+  public toggleMonthlyPaymentStatus(
+    id: string,
+    status: 'pago' | 'pendente' | 'atrasado'
+  ): MonthlyClient | undefined {
+    const client = this.monthlyClients.find((c) => c.id === id);
+    if (client) {
+      client.current_month_status = status;
+      if (status === 'pago') {
+        client.last_payment_date = new Date().toISOString().split('T')[0];
+      }
+      dbService.updateMonthlyClient(id, {
+        current_month_status: client.current_month_status,
+        last_payment_date: client.last_payment_date,
+      });
+      this.notify();
+    }
+    return client;
+  }
+
+  public getMonthlySubscriptionsSummary() {
+    const activeClients = this.monthlyClients.filter((c) => c.status === 'ativo');
+    const mrr = activeClients.reduce((acc, c) => acc + (c.monthly_value || 0), 0);
+    const arr = mrr * 12;
+    const paidThisMonth = activeClients
+      .filter((c) => c.current_month_status === 'pago')
+      .reduce((acc, c) => acc + (c.monthly_value || 0), 0);
+    const pendingThisMonth = activeClients
+      .filter((c) => c.current_month_status !== 'pago')
+      .reduce((acc, c) => acc + (c.monthly_value || 0), 0);
+
+    return {
+      mrr,
+      arr,
+      totalActive: activeClients.length,
+      paidThisMonth,
+      pendingThisMonth,
     };
   }
 
@@ -457,9 +794,13 @@ class CrmService {
   }
 
   public getFinancialSummary() {
-    const contratado = 34500;
-    const recebido = 26100;
-    const pendente = 8400;
+    const contratado = this.transactions.reduce((acc, t) => acc + (t.amount_contracted || 0), 0);
+    const recebido = this.transactions
+      .filter((t) => t.status === 'pago')
+      .reduce((acc, t) => acc + (t.amount_received || 0), 0);
+    const pendente = this.transactions
+      .filter((t) => t.status !== 'pago')
+      .reduce((acc, t) => acc + (t.amount_pending || 0), 0);
     return { contratado, recebido, pendente };
   }
 
@@ -490,6 +831,8 @@ class CrmService {
     const t = this.tasks.find(tk => tk.id === id);
     if (t) {
       t.status = t.status === 'concluida' ? 'pendente' : 'concluida';
+      dbService.updateTask(id, { status: t.status });
+      this.notify();
     }
   }
 
@@ -499,7 +842,15 @@ class CrmService {
       id: `tsk-${Date.now()}`,
     };
     this.tasks.unshift(newTask);
+    dbService.insertTask(newTask);
+    this.notify();
     return newTask;
+  }
+
+  public deleteTask(id: string): void {
+    this.tasks = this.tasks.filter(t => t.id !== id);
+    dbService.deleteTask(id);
+    this.notify();
   }
 
   // Logs & Insights
@@ -539,8 +890,21 @@ class CrmService {
     if (prospect) {
       prospect.status = status;
       prospect.updated_at = new Date().toISOString();
+      dbService.updateProspectStatus(id, status);
+      this.notify();
     }
     return prospect;
+  }
+
+  public addProspect(prospectData: Omit<Prospect, 'id'>): Prospect {
+    const newProspect: Prospect = {
+      ...prospectData,
+      id: `prp-${Date.now()}`,
+    };
+    this.prospects.unshift(newProspect);
+    dbService.insertProspect(newProspect);
+    this.notify();
+    return newProspect;
   }
 
   public convertProspectToLead(prospectId: string): Lead | undefined {

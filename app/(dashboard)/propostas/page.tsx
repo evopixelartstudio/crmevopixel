@@ -99,6 +99,7 @@ export default function PropostasPage() {
 
     const newPropItems: ProposalItem[] = selectedServices.map((s, idx) => ({
       id: `pi-${Date.now()}-${idx}`,
+      service_id: s.id,
       service_name: s.name,
       description: s.description,
       price: s.price,

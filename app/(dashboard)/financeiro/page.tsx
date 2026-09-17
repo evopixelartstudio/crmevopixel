@@ -50,7 +50,7 @@ export default function FinanceiroPage() {
         <div className="flex items-center gap-2.5">
           <Link href="/minha-historia">
             <Button variant="secondary" size="sm">
-              <span>Histórico Completo</span>
+              <span>Meu Histórico</span>
             </Button>
           </Link>
           <Button variant="primary" size="sm" className="gap-1.5">
@@ -139,57 +139,75 @@ export default function FinanceiroPage() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-[rgba(218,241,222,0.06)] text-[11px] font-mono text-[#65706A] uppercase">
-                <th className="py-3 px-3">Título / Cliente</th>
-                <th className="py-3 px-3">Categoria</th>
-                <th className="py-3 px-3">Vencimento</th>
-                <th className="py-3 px-3">Contratado</th>
-                <th className="py-3 px-3">Recebido</th>
-                <th className="py-3 px-3">Pendente</th>
-                <th className="py-3 px-3 text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[rgba(218,241,222,0.04)]">
-              {filteredTransactions.map((item) => (
-                <tr key={item.id} className="hover:bg-[#10201E]/40 transition-colors">
-                  <td className="py-3 px-3">
-                    <span className="font-medium text-[#E7ECE8]">{item.title}</span>
-                    <div className="text-[11px] text-[#9BA6A0]">{item.client_name}</div>
-                  </td>
-                  <td className="py-3 px-3 text-[#9BA6A0]">{item.category}</td>
-                  <td className="py-3 px-3 font-mono text-[#65706A]">
-                    {new Date(item.due_date).toLocaleDateString('pt-BR')}
-                  </td>
-                  <td className="py-3 px-3 font-mono text-[#E7ECE8]">
-                    R$ {item.amount_contracted.toLocaleString('pt-BR')}
-                  </td>
-                  <td className="py-3 px-3 font-mono text-[#8EB69B]">
-                    R$ {item.amount_received.toLocaleString('pt-BR')}
-                  </td>
-                  <td className="py-3 px-3 font-mono text-[#F1F9A1]">
-                    R$ {item.amount_pending.toLocaleString('pt-BR')}
-                  </td>
-                  <td className="py-3 px-3 text-right">
-                    <span
-                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-mono ${
-                        item.status === 'pago'
-                          ? 'bg-[#8EB69B]/10 text-[#8EB69B] border border-[#8EB69B]/20'
-                          : item.status === 'pendente'
-                          ? 'bg-[#F1F9A1]/10 text-[#F1F9A1] border border-[#F1F9A1]/20'
-                          : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                      }`}
-                    >
-                      {item.status.replace('_', ' ')}
-                    </span>
-                  </td>
+        {filteredTransactions.length === 0 ? (
+          <div className="py-16 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] flex items-center justify-center text-[#8EB69B] mx-auto mb-3">
+              <DollarSign className="w-6 h-6" />
+            </div>
+            <h4 className="text-base font-semibold text-[#E7ECE8] font-heading">
+              Nenhum lançamento financeiro
+            </h4>
+            <p className="text-xs text-[#9BA6A0] max-w-sm mx-auto mt-1 mb-5">
+              Suas movimentações e parcelas financeiras aparecerão aqui quando registradas.
+            </p>
+            <Button variant="primary" size="sm" className="gap-1.5 text-xs mx-auto">
+              <Plus className="w-3.5 h-3.5 text-[#07100F]" />
+              <span>Adicionar Primeiro Lançamento</span>
+            </Button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-[rgba(218,241,222,0.06)] text-[11px] font-mono text-[#65706A] uppercase">
+                  <th className="py-3 px-3">Título / Cliente</th>
+                  <th className="py-3 px-3">Categoria</th>
+                  <th className="py-3 px-3">Vencimento</th>
+                  <th className="py-3 px-3">Contratado</th>
+                  <th className="py-3 px-3">Recebido</th>
+                  <th className="py-3 px-3">Pendente</th>
+                  <th className="py-3 px-3 text-right">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-[rgba(218,241,222,0.04)]">
+                {filteredTransactions.map((item) => (
+                  <tr key={item.id} className="hover:bg-[#10201E]/40 transition-colors">
+                    <td className="py-3 px-3">
+                      <span className="font-medium text-[#E7ECE8]">{item.title}</span>
+                      <div className="text-[11px] text-[#9BA6A0]">{item.client_name}</div>
+                    </td>
+                    <td className="py-3 px-3 text-[#9BA6A0]">{item.category}</td>
+                    <td className="py-3 px-3 font-mono text-[#65706A]">
+                      {new Date(item.due_date).toLocaleDateString('pt-BR')}
+                    </td>
+                    <td className="py-3 px-3 font-mono text-[#E7ECE8]">
+                      R$ {item.amount_contracted.toLocaleString('pt-BR')}
+                    </td>
+                    <td className="py-3 px-3 font-mono text-[#8EB69B]">
+                      R$ {item.amount_received.toLocaleString('pt-BR')}
+                    </td>
+                    <td className="py-3 px-3 font-mono text-[#F1F9A1]">
+                      R$ {item.amount_pending.toLocaleString('pt-BR')}
+                    </td>
+                    <td className="py-3 px-3 text-right">
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-mono ${
+                          item.status === 'pago'
+                            ? 'bg-[#8EB69B]/10 text-[#8EB69B] border border-[#8EB69B]/20'
+                            : item.status === 'pendente'
+                            ? 'bg-[#F1F9A1]/10 text-[#F1F9A1] border border-[#F1F9A1]/20'
+                            : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                        }`}
+                      >
+                        {item.status.replace('_', ' ')}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
     </div>
   );

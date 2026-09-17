@@ -7,7 +7,7 @@ export async function GET() {
   const hasKey = Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
   const hasServiceKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-  if (!isSupabaseConfigured) {
+  if (!isSupabaseConfigured()) {
     return NextResponse.json({
       status: 'pending_configuration',
       message: 'Supabase ainda não configurado no .env.local. Insira sua URL e Anon Key.',
