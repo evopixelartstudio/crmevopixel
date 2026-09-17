@@ -54,95 +54,75 @@ class MetricsService {
     const transactions = crmService.getTransactions();
     const leads = crmService.getLeads();
     const historicalProjects = crmService.getHistoricalProjects();
+    const monthlySummary = crmService.getMonthlySubscriptionsSummary();
 
     const periodLabels: Record<TimePeriod, string> = {
       hoje: 'Hoje',
       '7d': 'Últimos 7 dias',
       '30d': 'Últimos 30 dias',
       '90d': 'Últimos 90 dias',
-      ano: 'Ano corrente (2026)',
+      ano: `Ano corrente (${new Date().getFullYear()})`,
       historico: 'Histórico Total Acumulado',
     };
 
-    // Cálculos dependentes do período
-    let faturamentoTotal = 147850;
-    let faturamentoRecebido = 139450;
-    let faturamentoPendente = 8400;
-    let ticketMedio = 4280;
-    let totalLeadsPeriodo = 84;
-    let oportunidadesPeriodo = 19;
-    let fechamentosPeriodo = 6;
-    let comparativo = 1.4;
+    // Faturamentos reais
+    const historicalReceived = historicalProjects.reduce((acc, p) => acc + (p.amount_received || 0), 0);
+    const activeReceived = transactions
+      .filter((t) => t.status === 'pago')
+      .reduce((acc, t) => acc + (t.amount_received || 0), 0);
+    const faturamentoRecebido = historicalReceived + activeReceived + monthlySummary.paidThisMonth;
 
-    if (period === 'hoje') {
-      faturamentoTotal = 2400;
-      faturamentoRecebido = 2000;
-      faturamentoPendente = 400;
-      ticketMedio = 2400;
-      totalLeadsPeriodo = 3;
-      oportunidadesPeriodo = 1;
-      fechamentosPeriodo = 1;
-      comparativo = 0;
-    } else if (period === '7d') {
-      faturamentoTotal = 4800;
-      faturamentoRecebido = 4800;
-      faturamentoPendente = 0;
-      ticketMedio = 3800;
-      totalLeadsPeriodo = 18;
-      oportunidadesPeriodo = 5;
-      fechamentosPeriodo = 2;
-      comparativo = 0.8;
-    } else if (period === '30d') {
-      faturamentoTotal = 11800;
-      faturamentoRecebido = 8800;
-      faturamentoPendente = 3000;
-      ticketMedio = 4280;
-      totalLeadsPeriodo = 84;
-      oportunidadesPeriodo = 19;
-      fechamentosPeriodo = 6;
-      comparativo = 1.4;
-    } else if (period === '90d') {
-      faturamentoTotal = 28400;
-      faturamentoRecebido = 23150;
-      faturamentoPendente = 5250;
-      ticketMedio = 4450;
-      totalLeadsPeriodo = 160;
-      oportunidadesPeriodo = 38;
-      fechamentosPeriodo = 12;
-      comparativo = 2.1;
-    } else if (period === 'ano') {
-      faturamentoTotal = 31550;
-      faturamentoRecebido = 23150;
-      faturamentoPendente = 8400;
-      ticketMedio = 4520;
-      totalLeadsPeriodo = 210;
-      oportunidadesPeriodo = 52;
-      fechamentosPeriodo = 16;
-      comparativo = 3.2;
-    }
+    const historicalPending = historicalProjects.reduce((acc, p) => acc + (p.amount_pending || 0), 0);
+    const activePending = transactions
+      .filter((t) => t.status !== 'pago')
+      .reduce((acc, t) => acc + (t.amount_pending || 0), 0);
+    const faturamentoPendente = historicalPending + activePending + monthlySummary.pendingThisMonth;
 
-    const taxaConv = Number(((fechamentosPeriodo / (totalLeadsPeriodo || 1)) * 100).toFixed(1));
+    const faturamentoTotal = faturamentoRecebido + faturamentoPendente;
 
-    const openOpps = opportunities.filter(o => o.stage_slug !== 'fechado' && o.stage_slug !== 'perdido');
-    const valorOppsAbertas = openOpps.reduce((acc, o) => acc + o.estimated_value, 0);
+    const totalLeadsPeriodo = leads.length;
+    const oportunidadesPeriodo = opportunities.length;
+    const fechamentosPeriodo = opportunities.filter((o) => o.stage_slug === 'fechado').length;
+    const completedCount = historicalProjects.length + transactions.filter((t) => t.status === 'pago').length;
+    const ticketMedio = completedCount > 0 ? Math.round(faturamentoTotal / completedCount) : 0;
+    const comparativo = 0;
 
-    const receitaPorNicho = [
-      { nicho: 'Clínicas / Odonto / Estética', valor: 54800, percentual: 37 },
-      { nicho: 'Contabilidade & B2B', valor: 41200, percentual: 28 },
-      { nicho: 'Imobiliárias', valor: 28450, percentual: 19 },
-      { nicho: 'Consultorias & Engenharia', valor: 23400, percentual: 16 },
-    ];
+    const taxaConv = totalLeadsPeriodo > 0
+      ? Number(((fechamentosPeriodo / totalLeadsPeriodo) * 100).toFixed(1))
+      : 0;
 
-    const receitaPorServico = [
-      { servico: 'Sites Institucionais', valor: 62400, percentual: 42 },
-      { servico: 'Automação & IA (n8n/WhatsApp)', valor: 41500, percentual: 28 },
-      { servico: 'Landing Pages de Conversão', valor: 29800, percentual: 20 },
-      { servico: 'Identidade & Posicionamento Local', valor: 14150, percentual: 10 },
-    ];
+    const openOpps = opportunities.filter((o) => o.stage_slug !== 'fechado' && o.stage_slug !== 'perdido');
+    const valorOppsAbertas = openOpps.reduce((acc, o) => acc + (o.estimated_value || 0), 0);
+
+    // Receita por nicho dinâmica
+    const nicheMap: Record<string, number> = {};
+    leads.forEach((l) => {
+      if (l.segment) nicheMap[l.segment] = (nicheMap[l.segment] || 0) + 1;
+    });
+    const receitaPorNicho = Object.entries(nicheMap).map(([nicho, count]) => ({
+      nicho,
+      valor: count * ticketMedio,
+      percentual: totalLeadsPeriodo > 0 ? Math.round((count / totalLeadsPeriodo) * 100) : 0,
+    }));
+
+    // Receita por serviço dinâmica
+    const serviceMap: Record<string, number> = {};
+    leads.forEach((l) => {
+      l.services?.forEach((s) => {
+        serviceMap[s] = (serviceMap[s] || 0) + 1;
+      });
+    });
+    const receitaPorServico = Object.entries(serviceMap).map(([servico, count]) => ({
+      servico,
+      valor: count * ticketMedio,
+      percentual: totalLeadsPeriodo > 0 ? Math.round((count / totalLeadsPeriodo) * 100) : 0,
+    }));
 
     const metaFaturamento = goals?.faturamento_alvo || 15000;
-    const faturamentoRealizado = goals?.faturamento_atual || 8800;
-    const percentualMeta = Number(((faturamentoRealizado / metaFaturamento) * 100).toFixed(1));
+    const faturamentoRealizado = goals?.faturamento_atual || faturamentoRecebido;
+    const percentualMeta = metaFaturamento > 0
+      ? Number(((faturamentoRealizado / metaFaturamento) * 100).toFixed(1))
+      : 0;
 
     return {
       period,
@@ -158,17 +138,17 @@ class MetricsService {
         fechamentos: fechamentosPeriodo,
         comparativoAnterior: comparativo,
       },
-      leadsQualificados: leads.filter(l => l.score >= 70).length,
+      leadsQualificados: leads.filter((l) => (l.score || 0) >= 70).length,
       oportunidadesAbertas: {
         quantidade: openOpps.length,
         valorTotal: valorOppsAbertas,
       },
       taxaRespostaProspeccao: {
-        taxaGeral: 18.2,
+        taxaGeral: 0,
         melhorNicho: {
-          nome: 'Contabilidade',
-          taxa: 34.0,
-          etapaMaisEficaz: 'Etapa 2 — Follow-up 1',
+          nome: '—',
+          taxa: 0,
+          etapaMaisEficaz: '—',
         },
       },
       receitaPorNicho,

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { crmService } from '@/lib/services/crm-service';
+import { useCrmSync } from '@/lib/hooks/useCrmSync';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -19,6 +20,7 @@ import {
 } from 'lucide-react';
 
 export default function MinhaHistoriaPage() {
+  useCrmSync();
   const data = crmService.getMinhaHistoriaData();
   const [metricMode, setMetricMode] = useState<'recebido' | 'contratado' | 'pendente'>('recebido');
   const [periodFilter, setPeriodFilter] = useState<'ano' | 'mes'>('ano');
@@ -39,7 +41,7 @@ export default function MinhaHistoriaPage() {
           </div>
 
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-semibold text-[#E7ECE8] font-heading tracking-tight">
-            Minha História
+            Meu Histórico
           </h1>
 
           <div className="pt-2">
@@ -249,45 +251,51 @@ export default function MinhaHistoriaPage() {
           </Link>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="border-b border-[rgba(218,241,222,0.06)] text-[11px] font-mono text-[#65706A] uppercase">
-                <th className="py-2.5 px-3">Cliente / Empresa</th>
-                <th className="py-2.5 px-3">Serviços Executados</th>
-                <th className="py-2.5 px-3">Data</th>
-                <th className="py-2.5 px-3">Contratado</th>
-                <th className="py-2.5 px-3">Recebido</th>
-                <th className="py-2.5 px-3">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[rgba(218,241,222,0.04)]">
-              {historicalProjects.map((hp) => (
-                <tr key={hp.id} className="hover:bg-[#10201E]/40">
-                  <td className="py-3 px-3 font-medium text-[#E7ECE8]">
-                    {hp.company_name}
-                    <div className="text-[11px] text-[#9BA6A0]">{hp.client_name}</div>
-                  </td>
-                  <td className="py-3 px-3 text-[#9BA6A0]">{hp.services_summary}</td>
-                  <td className="py-3 px-3 font-mono text-[#65706A]">
-                    {new Date(hp.project_date).toLocaleDateString('pt-BR')}
-                  </td>
-                  <td className="py-3 px-3 font-mono text-[#E7ECE8]">
-                    R$ {hp.amount_contracted.toLocaleString('pt-BR')}
-                  </td>
-                  <td className="py-3 px-3 font-mono text-[#8EB69B]">
-                    R$ {hp.amount_received.toLocaleString('pt-BR')}
-                  </td>
-                  <td className="py-3 px-3">
-                    <span className="px-2 py-0.5 rounded text-[10px] bg-[#163832] text-[#8EB69B] font-mono">
-                      {hp.status}
-                    </span>
-                  </td>
+        {historicalProjects.length === 0 ? (
+          <div className="py-12 text-center text-xs text-[#9BA6A0] bg-[#10201E]/30 rounded-xl border border-[rgba(218,241,222,0.04)]">
+            Nenhum projeto histórico cadastrado no momento. Conforme seus projetos forem concluídos, eles comporão este registro.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-[rgba(218,241,222,0.06)] text-[11px] font-mono text-[#65706A] uppercase">
+                  <th className="py-2.5 px-3">Cliente / Empresa</th>
+                  <th className="py-2.5 px-3">Serviços Executados</th>
+                  <th className="py-2.5 px-3">Data</th>
+                  <th className="py-2.5 px-3">Contratado</th>
+                  <th className="py-2.5 px-3">Recebido</th>
+                  <th className="py-2.5 px-3">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-[rgba(218,241,222,0.04)]">
+                {historicalProjects.map((hp) => (
+                  <tr key={hp.id} className="hover:bg-[#10201E]/40">
+                    <td className="py-3 px-3 font-medium text-[#E7ECE8]">
+                      {hp.company_name}
+                      <div className="text-[11px] text-[#9BA6A0]">{hp.client_name}</div>
+                    </td>
+                    <td className="py-3 px-3 text-[#9BA6A0]">{hp.services_summary}</td>
+                    <td className="py-3 px-3 font-mono text-[#65706A]">
+                      {new Date(hp.project_date).toLocaleDateString('pt-BR')}
+                    </td>
+                    <td className="py-3 px-3 font-mono text-[#E7ECE8]">
+                      R$ {hp.amount_contracted.toLocaleString('pt-BR')}
+                    </td>
+                    <td className="py-3 px-3 font-mono text-[#8EB69B]">
+                      R$ {hp.amount_received.toLocaleString('pt-BR')}
+                    </td>
+                    <td className="py-3 px-3">
+                      <span className="px-2 py-0.5 rounded text-[10px] bg-[#163832] text-[#8EB69B] font-mono">
+                        {hp.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
     </div>
   );

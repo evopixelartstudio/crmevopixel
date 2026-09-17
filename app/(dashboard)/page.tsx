@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { crmService } from '@/lib/services/crm-service';
+import { useCrmSync } from '@/lib/hooks/useCrmSync';
 import { metricsService, TimePeriod } from '@/lib/services/metrics-service';
 import { Button } from '@/components/ui/Button';
 import { MetricCard } from '@/components/ui/MetricCard';
@@ -23,9 +24,11 @@ import {
   HelpCircle,
   BarChart2,
   ExternalLink,
+  CalendarCheck,
 } from 'lucide-react';
 
 export default function DashboardPage() {
+  useCrmSync();
   const [selectedPeriod, setSelectedPeriod] = useState<TimePeriod>('30d');
   const metrics = metricsService.getMetrics(selectedPeriod);
 
@@ -36,6 +39,9 @@ export default function DashboardPage() {
   const evoInsights = crmService.getEvoInsights();
   const nextBestActions = crmService.getNextBestActions();
   const commercialGoals = crmService.getCommercialGoals();
+  const monthlyEvolution = crmService.getMonthlyEvolution();
+  const monthlySummary = crmService.getMonthlySubscriptionsSummary();
+  const maxMonthVal = Math.max(...monthlyEvolution.map((m) => m.value), 1);
 
   // Filtra prospects recomendados para hoje (ICP >= 80 e status priority)
   const prospectsToProspectToday = prospects.filter((p) => p.status === 'priority').slice(0, 3);
@@ -122,7 +128,7 @@ export default function DashboardPage() {
             </div>
             <Link href="/minha-historia">
               <Button variant="ghost" size="sm" className="text-xs text-[#8EB69B] hover:text-[#F1F9A1] gap-1">
-                <span>Ver Minha História</span>
+                <span>Ver Meu Histórico</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </Button>
             </Link>
@@ -135,7 +141,11 @@ export default function DashboardPage() {
               <div className="text-xl font-medium text-[#E7ECE8] font-heading mt-1">
                 R$ {overview.recebido.toLocaleString('pt-BR')}
               </div>
-              <span className="text-[10px] text-[#8EB69B]">94.3% liquidado</span>
+              <span className="text-[10px] text-[#8EB69B]">
+                {overview.faturamentoAcumulado + overview.aReceber > 0
+                  ? `${(((overview.recebido) / (overview.faturamentoAcumulado + overview.aReceber)) * 100).toFixed(1)}% liquidado`
+                  : '0% liquidado'}
+              </span>
             </div>
             <div className="p-3.5 rounded-xl bg-[#10201E]/70 border border-[rgba(218,241,222,0.05)]">
               <span className="text-[11px] text-[#9BA6A0]">A receber</span>
@@ -146,29 +156,46 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Gráfico sutil de evolução histórica */}
+          {/* Gráfico de evolução de faturamento por mês (12 meses) */}
           <div className="mt-6 pt-5 border-t border-[rgba(218,241,222,0.06)]">
             <div className="flex items-center justify-between text-xs text-[#9BA6A0] mb-3">
-              <span className="font-heading">Evolução de Faturamento por Ano</span>
-              <span className="text-[11px] font-mono text-[#8EB69B]">+32% média anual</span>
+              <span className="font-heading">Evolução de Faturamento por Mês</span>
+              <span className="text-[11px] font-mono text-[#8EB69B]">
+                Total Ano: R$ {monthlyEvolution.reduce((acc, m) => acc + m.value, 0).toLocaleString('pt-BR')}
+              </span>
             </div>
-            <div className="h-16 flex items-end gap-3 pt-2">
-              <div className="flex-1 flex flex-col items-center gap-1.5">
-                <div className="w-full bg-[#163832] rounded-t-sm h-6 transition-all hover:bg-[#235347]" title="2023: R$ 24.800" />
-                <span className="text-[10px] font-mono text-[#65706A]">2023</span>
-              </div>
-              <div className="flex-1 flex flex-col items-center gap-1.5">
-                <div className="w-full bg-[#163832] rounded-t-sm h-10 transition-all hover:bg-[#235347]" title="2024: R$ 46.500" />
-                <span className="text-[10px] font-mono text-[#65706A]">2024</span>
-              </div>
-              <div className="flex-1 flex flex-col items-center gap-1.5">
-                <div className="w-full bg-[#235347] rounded-t-sm h-14 transition-all hover:bg-[#8EB69B]" title="2025: R$ 61.800" />
-                <span className="text-[10px] font-mono text-[#8EB69B]">2025</span>
-              </div>
-              <div className="flex-1 flex flex-col items-center gap-1.5">
-                <div className="w-full bg-[#F1F9A1]/80 rounded-t-sm h-8 transition-all hover:bg-[#F1F9A1]" title="2026: R$ 23.150 em curso" />
-                <span className="text-[10px] font-mono text-[#F1F9A1]">2026</span>
-              </div>
+            <div className="h-20 flex items-end gap-1.5 sm:gap-2 pt-2">
+              {monthlyEvolution.map((m) => {
+                const heightPct = m.value > 0 ? Math.max(20, Math.round((m.value / maxMonthVal) * 100)) : 8;
+                return (
+                  <div key={m.month} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end group">
+                    <div
+                      style={{ height: `${heightPct}%` }}
+                      className={`w-full rounded-t-sm transition-all relative ${
+                        m.value > 0
+                          ? m.isCurrent
+                            ? 'bg-[#F1F9A1] hover:brightness-110'
+                            : 'bg-[#235347] hover:bg-[#8EB69B]'
+                          : m.isCurrent
+                          ? 'bg-[#163832] border-t border-[#F1F9A1]/50'
+                          : 'bg-[#10201E]/80 hover:bg-[#163832]'
+                      }`}
+                      title={`${m.fullName}: R$ ${m.value.toLocaleString('pt-BR')}`}
+                    >
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-7 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-[#050706] text-[9px] text-[#E7ECE8] rounded border border-[rgba(218,241,222,0.1)] whitespace-nowrap pointer-events-none z-10 font-mono">
+                        R$ {m.value.toLocaleString('pt-BR')}
+                      </div>
+                    </div>
+                    <span
+                      className={`text-[9px] sm:text-[10px] font-mono ${
+                        m.isCurrent ? 'text-[#F1F9A1] font-semibold' : 'text-[#65706A]'
+                      }`}
+                    >
+                      {m.month}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -203,6 +230,58 @@ export default function DashboardPage() {
             trend={metrics.taxaRespostaProspeccao.melhorNicho.etapaMaisEficaz}
             trendPositive={true}
           />
+        </div>
+      </div>
+
+      {/* 2.5 BLOCO: CLIENTES MENSALISTAS & RECEITA RECORRENTE (MRR) */}
+      <div className="bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.16)] rounded-2xl p-6 transition-all shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="flex items-start sm:items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-[#10201E] border border-[rgba(218,241,222,0.1)] flex items-center justify-center text-[#F1F9A1] shrink-0">
+              <CalendarCheck className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-semibold text-[#E7ECE8] font-heading">
+                  Clientes Mensalistas & Recorrência
+                </h3>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#163832] text-[#F1F9A1] border border-[#F1F9A1]/20">
+                  MRR
+                </span>
+              </div>
+              <p className="text-xs text-[#9BA6A0] mt-0.5 max-w-xl">
+                Controle de clientes com contratos contínuos de suporte, hospedagem, evolução web e automação IA.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6 border-t lg:border-t-0 border-[rgba(218,241,222,0.06)] pt-4 lg:pt-0">
+            <div>
+              <span className="text-[10px] font-mono uppercase text-[#65706A]">MRR Contratado</span>
+              <div className="text-xl font-semibold font-mono text-[#F1F9A1] mt-0.5">
+                R$ {monthlySummary.mrr.toLocaleString('pt-BR')}
+                <span className="text-xs text-[#8EB69B] font-normal">/mês</span>
+              </div>
+            </div>
+            <div>
+              <span className="text-[10px] font-mono uppercase text-[#65706A]">Assinantes Ativos</span>
+              <div className="text-xl font-semibold font-mono text-[#E7ECE8] mt-0.5">
+                {monthlySummary.totalActive}
+              </div>
+            </div>
+            <div>
+              <span className="text-[10px] font-mono uppercase text-[#65706A]">Pago este mês</span>
+              <div className="text-xl font-semibold font-mono text-[#8EB69B] mt-0.5">
+                R$ {monthlySummary.paidThisMonth.toLocaleString('pt-BR')}
+              </div>
+            </div>
+            <Link href="/mensalidades">
+              <Button variant="secondary" size="sm" className="gap-1.5 text-xs">
+                <span>Ver Mensalistas</span>
+                <ArrowRight className="w-3.5 h-3.5 text-[#8EB69B]" />
+              </Button>
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -293,55 +372,65 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {evoInsights.map((item) => (
-            <div
-              key={item.id}
-              className="bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.18)] rounded-2xl p-5 flex flex-col justify-between transition-all group shadow-sm"
-            >
-              <div>
-                <div className="flex items-center justify-between text-xs mb-3">
-                  <span
-                    className={`text-[9px] font-mono font-semibold px-2 py-0.5 rounded tracking-wider uppercase ${
-                      item.type === 'DADO'
-                        ? 'bg-[#10201E] text-[#8EB69B] border border-[#8EB69B]/30'
-                        : item.type === 'INFERENCIA'
-                        ? 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
-                        : 'bg-[#163832] text-[#F1F9A1] border border-[#F1F9A1]/30'
-                    }`}
-                  >
-                    [{item.type}]
-                  </span>
-                  <span className="text-[10px] font-mono text-[#65706A]">
-                    {item.period}
-                  </span>
+        {evoInsights.length === 0 ? (
+          <div className="py-8 px-6 rounded-2xl bg-[#0C1A19]/50 border border-[rgba(218,241,222,0.06)] text-center">
+            <Sparkles className="w-5 h-5 text-[#8EB69B] mx-auto mb-2" />
+            <p className="text-sm text-[#E7ECE8] font-medium">Motor Evo Intelligence Pronto</p>
+            <p className="text-xs text-[#9BA6A0] mt-0.5 max-w-md mx-auto">
+              Conforme você cadastrar seus leads, propostas e clientes, a inteligência analítica gerará recomendações e análises automaticamente.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {evoInsights.map((item) => (
+              <div
+                key={item.id}
+                className="bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.18)] rounded-2xl p-5 flex flex-col justify-between transition-all group shadow-sm"
+              >
+                <div>
+                  <div className="flex items-center justify-between text-xs mb-3">
+                    <span
+                      className={`text-[9px] font-mono font-semibold px-2 py-0.5 rounded tracking-wider uppercase ${
+                        item.type === 'DADO'
+                          ? 'bg-[#10201E] text-[#8EB69B] border border-[#8EB69B]/30'
+                          : item.type === 'INFERENCIA'
+                          ? 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
+                          : 'bg-[#163832] text-[#F1F9A1] border border-[#F1F9A1]/30'
+                      }`}
+                    >
+                      [{item.type}]
+                    </span>
+                    <span className="text-[10px] font-mono text-[#65706A]">
+                      {item.period}
+                    </span>
+                  </div>
+
+                  <h4 className="text-xs font-semibold text-[#E7ECE8] font-heading leading-snug mb-2">
+                    {item.title}
+                  </h4>
+
+                  <p className="text-xs text-[#9BA6A0] leading-relaxed">
+                    {item.explanation}
+                  </p>
                 </div>
 
-                <h4 className="text-xs font-semibold text-[#E7ECE8] font-heading leading-snug mb-2">
-                  {item.title}
-                </h4>
-
-                <p className="text-xs text-[#9BA6A0] leading-relaxed">
-                  {item.explanation}
-                </p>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-[rgba(218,241,222,0.06)] space-y-2">
-                <div className="text-[10px] font-mono text-[#65706A]">
-                  Origem: {item.data_source}
+                <div className="mt-4 pt-3 border-t border-[rgba(218,241,222,0.06)] space-y-2">
+                  <div className="text-[10px] font-mono text-[#65706A]">
+                    Origem: {item.data_source}
+                  </div>
+                  {item.suggested_action && (
+                    <Link href={item.suggested_action.link}>
+                      <Button variant="secondary" size="sm" className="w-full text-xs gap-1 py-1 h-7">
+                        <span>{item.suggested_action.label}</span>
+                        <ArrowRight className="w-3 h-3 text-[#8EB69B]" />
+                      </Button>
+                    </Link>
+                  )}
                 </div>
-                {item.suggested_action && (
-                  <Link href={item.suggested_action.link}>
-                    <Button variant="secondary" size="sm" className="w-full text-xs gap-1 py-1 h-7">
-                      <span>{item.suggested_action.label}</span>
-                      <ArrowRight className="w-3 h-3 text-[#8EB69B]" />
-                    </Button>
-                  </Link>
-                )}
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 5. BLOCO PRESERVADO: "O que precisa da sua atenção" (Seção 14 da Spec) */}
@@ -361,68 +450,78 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {overview.attentionItems.map((item) => (
-            <div
-              key={item.id}
-              className="bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.18)] rounded-2xl p-5 flex flex-col justify-between transition-all group shadow-sm"
-            >
-              <div>
-                <div className="flex items-center justify-between text-xs mb-3">
-                  <span className="font-mono text-[11px] text-[#65706A] font-semibold">
-                    {item.index}
-                  </span>
-                  {item.type === 'lead_hot' && (
-                    <Badge variant="quente" className="text-[10px] py-0 px-2">
-                      <Flame className="w-3 h-3 text-[#F1F9A1]" />
-                      Quente
-                    </Badge>
-                  )}
-                  {item.type === 'proposal_pending' && (
-                    <Badge variant="morno" className="text-[10px] py-0 px-2">
-                      Aguardando
-                    </Badge>
-                  )}
-                  {item.type === 'followup_overdue' && (
-                    <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
-                      Atrasado
+        {overview.attentionItems.length === 0 ? (
+          <div className="py-8 px-6 rounded-2xl bg-[#0C1A19]/50 border border-[rgba(218,241,222,0.06)] text-center">
+            <CheckCircle2 className="w-5 h-5 text-[#8EB69B] mx-auto mb-2" />
+            <p className="text-sm text-[#E7ECE8] font-medium">Tudo em dia!</p>
+            <p className="text-xs text-[#9BA6A0] mt-0.5">
+              Nenhuma pendência crítica, proposta aguardando ou follow-up atrasado no momento.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {overview.attentionItems.map((item) => (
+              <div
+                key={item.id}
+                className="bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.18)] rounded-2xl p-5 flex flex-col justify-between transition-all group shadow-sm"
+              >
+                <div>
+                  <div className="flex items-center justify-between text-xs mb-3">
+                    <span className="font-mono text-[11px] text-[#65706A] font-semibold">
+                      {item.index}
                     </span>
-                  )}
-                  {item.type === 'n8n_followup' && (
-                    <Badge variant="accent" className="text-[10px] py-0 px-2">
-                      <Zap className="w-3 h-3 text-[#F1F9A1]" />
-                      IA / n8n
-                    </Badge>
-                  )}
+                    {item.type === 'lead_hot' && (
+                      <Badge variant="quente" className="text-[10px] py-0 px-2">
+                        <Flame className="w-3 h-3 text-[#F1F9A1]" />
+                        Quente
+                      </Badge>
+                    )}
+                    {item.type === 'proposal_pending' && (
+                      <Badge variant="morno" className="text-[10px] py-0 px-2">
+                        Aguardando
+                      </Badge>
+                    )}
+                    {item.type === 'followup_overdue' && (
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
+                        Atrasado
+                      </span>
+                    )}
+                    {item.type === 'n8n_followup' && (
+                      <Badge variant="accent" className="text-[10px] py-0 px-2">
+                        <Zap className="w-3 h-3 text-[#F1F9A1]" />
+                        IA / n8n
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="text-xs font-medium text-[#9BA6A0] leading-snug">
+                    {item.title}
+                  </div>
+
+                  <div className="text-sm font-semibold text-[#E7ECE8] font-heading mt-1 mb-1">
+                    {item.target}
+                  </div>
+
+                  <div className="text-xs text-[#65706A] font-mono leading-tight">
+                    {item.detail}
+                  </div>
                 </div>
 
-                <div className="text-xs font-medium text-[#9BA6A0] leading-snug">
-                  {item.title}
-                </div>
-
-                <div className="text-sm font-semibold text-[#E7ECE8] font-heading mt-1 mb-1">
-                  {item.target}
-                </div>
-
-                <div className="text-xs text-[#65706A] font-mono leading-tight">
-                  {item.detail}
+                <div className="mt-5 pt-3 border-t border-[rgba(218,241,222,0.06)]">
+                  <Link href={item.link}>
+                    <Button
+                      variant={item.type === 'lead_hot' ? 'primary' : 'secondary'}
+                      size="sm"
+                      className="w-full text-xs"
+                    >
+                      {item.actionLabel}
+                    </Button>
+                  </Link>
                 </div>
               </div>
-
-              <div className="mt-5 pt-3 border-t border-[rgba(218,241,222,0.06)]">
-                <Link href={item.link}>
-                  <Button
-                    variant={item.type === 'lead_hot' ? 'primary' : 'secondary'}
-                    size="sm"
-                    className="w-full text-xs"
-                  >
-                    {item.actionLabel}
-                  </Button>
-                </Link>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 6. NOVO BLOCO DUPLO: 🎯 PROSPECTAR HOJE & PRÓXIMA MELHOR AÇÃO */}

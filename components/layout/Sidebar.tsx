@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { clsx } from 'clsx';
+import { Logo } from '@/components/ui/Logo';
 import {
   LayoutDashboard,
   Users,
@@ -27,6 +28,7 @@ import {
   History,
   Bot,
   Crosshair,
+  CalendarCheck,
 } from 'lucide-react';
 
 interface NavItem {
@@ -54,10 +56,10 @@ export function Sidebar() {
     {
       title: 'COMERCIAL',
       items: [
-        { label: 'Prospects', href: '/prospects', icon: Target, badge: '5' },
-        { label: 'Leads', href: '/leads', icon: Users, badge: '5' },
+        { label: 'Prospects', href: '/prospects', icon: Target },
+        { label: 'Leads', href: '/leads', icon: Users },
         { label: 'Prospecção IA', href: '/prospeccao', icon: Sparkles },
-        { label: 'Pipeline', href: '/pipeline', icon: Kanban, badge: 'R$ 15k' },
+        { label: 'Pipeline', href: '/pipeline', icon: Kanban },
         { label: 'Oportunidades', href: '/oportunidades', icon: Crosshair },
       ],
     },
@@ -65,9 +67,10 @@ export function Sidebar() {
       title: 'GESTÃO',
       items: [
         { label: 'Clientes', href: '/clientes', icon: Building2 },
+        { label: 'Mensalistas', href: '/mensalidades', icon: CalendarCheck, badge: 'MRR' },
         { label: 'Projetos', href: '/projetos', icon: Briefcase },
-        { label: 'Tarefas', href: '/tarefas', icon: CheckSquare, badge: '4' },
-        { label: 'Follow-ups', href: '/follow-ups', icon: Clock, badge: 'Hoje' },
+        { label: 'Tarefas', href: '/tarefas', icon: CheckSquare },
+        { label: 'Follow-ups', href: '/follow-ups', icon: Clock },
       ],
     },
     {
@@ -77,7 +80,7 @@ export function Sidebar() {
         { label: 'Contratos', href: '/contratos', icon: FileCheck },
         { label: 'Serviços', href: '/servicos', icon: Layers },
         { label: 'Financeiro', href: '/financeiro', icon: DollarSign },
-        { label: 'Minha História', href: '/minha-historia', icon: History },
+        { label: 'Meu Histórico', href: '/minha-historia', icon: History },
       ],
     },
     {
@@ -99,27 +102,20 @@ export function Sidebar() {
         isCollapsed ? 'w-20' : 'w-64'
       )}
     >
-      {/* Header com Logo */}
-      <div className="h-16 flex items-center justify-between px-5 border-b border-[rgba(218,241,222,0.06)] bg-[#050706]/40">
-        <Link href="/" className="flex items-center gap-2.5 overflow-hidden">
-          <div className="w-8 h-8 rounded-lg bg-[#0C1A19] border border-[rgba(218,241,222,0.12)] flex items-center justify-center shrink-0 shadow-inner">
-            <span className="text-[#F1F9A1] font-heading font-bold text-sm tracking-wider">E</span>
-          </div>
-          {!isCollapsed && (
-            <div className="flex flex-col">
-              <span className="font-heading font-semibold text-sm tracking-tight text-[#E7ECE8] flex items-center gap-1.5">
-                EVO<span className="text-[#8EB69B]">CRM</span>
-              </span>
-              <span className="text-[10px] text-[#65706A] uppercase tracking-widest font-mono">
-                EvoPixel OS
-              </span>
-            </div>
-          )}
+      {/* Header com Logo Oficial EvoPixel */}
+      <div
+        className={clsx(
+          'h-16 flex items-center justify-between border-b border-[rgba(218,241,222,0.06)] bg-[#050706]/40 transition-all duration-200',
+          isCollapsed ? 'px-3' : 'px-5'
+        )}
+      >
+        <Link href="/" className="flex items-center overflow-hidden py-1 group" title="EvoPixel OS">
+          <Logo isCollapsed={isCollapsed} />
         </Link>
 
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className="text-[#9BA6A0] hover:text-[#E7ECE8] p-1.5 rounded-lg hover:bg-[#10201E] transition-colors"
+          className="text-[#9BA6A0] hover:text-[#E7ECE8] p-1.5 rounded-lg hover:bg-[#10201E] transition-colors shrink-0"
           title={isCollapsed ? 'Expandir menu' : 'Recolher menu'}
         >
           {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}

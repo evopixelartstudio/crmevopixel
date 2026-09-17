@@ -625,9 +625,33 @@ CREATE TABLE IF NOT EXISTS ai_feedback (
 );
 
 -- ------------------------------------------------------------------------------
+-- 15.1. MENSALISTAS & RECORRÊNCIA (MRR)
+-- ------------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS monthly_clients (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
+    client_name TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    segment TEXT NOT NULL DEFAULT 'Geral',
+    plan_name TEXT NOT NULL,
+    monthly_value NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    billing_day INTEGER NOT NULL DEFAULT 10,
+    payment_method TEXT NOT NULL DEFAULT 'pix' CHECK (payment_method IN ('pix', 'boleto', 'cartao', 'transferencia')),
+    status TEXT NOT NULL DEFAULT 'ativo' CHECK (status IN ('ativo', 'inadimplente', 'pausado', 'cancelado')),
+    current_month_status TEXT NOT NULL DEFAULT 'pendente' CHECK (current_month_status IN ('pago', 'pendente', 'atrasado')),
+    start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    last_payment_date DATE,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ------------------------------------------------------------------------------
 -- 16. SEGURANÇA & ROW LEVEL SECURITY (RLS)
 -- ------------------------------------------------------------------------------
 
+ALTER TABLE monthly_clients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE business_context ENABLE ROW LEVEL SECURITY;
 ALTER TABLE commercial_goals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE prospects ENABLE ROW LEVEL SECURITY;
@@ -644,6 +668,9 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated_manage_prospects') THEN
         CREATE POLICY authenticated_manage_prospects ON prospects FOR ALL TO authenticated USING (true) WITH CHECK (true);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated_manage_monthly_clients') THEN
+        CREATE POLICY authenticated_manage_monthly_clients ON monthly_clients FOR ALL TO authenticated USING (true) WITH CHECK (true);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'authenticated_manage_goals') THEN
         CREATE POLICY authenticated_manage_goals ON commercial_goals FOR ALL TO authenticated USING (true) WITH CHECK (true);

@@ -31,6 +31,8 @@ import {
   Zap,
 } from 'lucide-react';
 import { aiProvider, AIProviderConfig } from '@/lib/ai/ai-provider';
+import { updateClientConfig } from '@/lib/supabase/client';
+import { crmService } from '@/lib/services/crm-service';
 
 export default function ConfiguracoesPage() {
   const [evolutionUrl, setEvolutionUrl] = useState('https://evolution.evopixel.com.br');
@@ -42,6 +44,11 @@ export default function ConfiguracoesPage() {
   const [isCheckingSupabase, setIsCheckingSupabase] = useState(false);
   const [copiedSchema, setCopiedSchema] = useState(false);
   const [copiedVPSCommand, setCopiedVPSCommand] = useState(false);
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState('');
+  const [showSupabaseKey, setShowSupabaseKey] = useState(false);
+  const [isSavingSupabase, setIsSavingSupabase] = useState(false);
+  const [supabaseFeedback, setSupabaseFeedback] = useState<{ success: boolean; message: string } | null>(null);
 
   // AI Providers State
   const [aiConfig, setAiConfig] = useState<AIProviderConfig>(aiProvider.getConfig());
@@ -59,6 +66,9 @@ export default function ConfiguracoesPage() {
       const res = await fetch('/api/supabase-status');
       const data = await res.json();
       setSupabaseStatus(data);
+      if (data.url && !supabaseUrl) {
+        setSupabaseUrl(data.url);
+      }
     } catch {
       setSupabaseStatus({ status: 'error', message: 'Erro ao conectar à API local.' });
     } finally {
@@ -66,8 +76,46 @@ export default function ConfiguracoesPage() {
     }
   };
 
+  const loadSupabaseConfig = async () => {
+    try {
+      const res = await fetch('/api/supabase/config');
+      const data = await res.json();
+      if (data.url) setSupabaseUrl(data.url);
+    } catch {}
+  };
+
+  const handleSaveSupabase = async () => {
+    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
+      setSupabaseFeedback({ success: false, message: 'Preencha a URL do projeto e a Chave Anon.' });
+      return;
+    }
+    setIsSavingSupabase(true);
+    setSupabaseFeedback(null);
+    try {
+      const res = await fetch('/api/supabase/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: supabaseUrl, anonKey: supabaseAnonKey }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSupabaseFeedback({ success: true, message: 'Supabase conectado e salvo com sucesso!' });
+        updateClientConfig(supabaseUrl, supabaseAnonKey);
+        crmService.initFromSupabase(true);
+        checkSupabaseStatus();
+      } else {
+        setSupabaseFeedback({ success: false, message: data.error || 'Erro ao conectar ao Supabase.' });
+      }
+    } catch (err: any) {
+      setSupabaseFeedback({ success: false, message: err?.message || 'Falha na requisição.' });
+    } finally {
+      setIsSavingSupabase(false);
+    }
+  };
+
   useEffect(() => {
     checkSupabaseStatus();
+    loadSupabaseConfig();
     setAiConfig(aiProvider.loadConfig());
   }, []);
 
@@ -545,6 +593,97 @@ export default function ConfiguracoesPage() {
                 <ExternalLink className="w-3.5 h-3.5 text-[#07100F]" />
               </Button>
             </a>
+          </div>
+        </div>
+
+        {/* Formulário de Conexão Direta ao Supabase */}
+        <div className="p-5 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h4 className="text-sm font-semibold text-[var(--evo-text)] font-heading flex items-center gap-2">
+                <Key className="w-4 h-4 text-[#F1F9A1]" />
+                Conectar Projeto Supabase
+              </h4>
+              <p className="text-xs text-[var(--evo-muted)]">
+                Insira a URL do seu projeto e a chave Anon para habilitar o salvamento em tempo real no banco PostgreSQL.
+              </p>
+            </div>
+            {supabaseStatus?.status === 'connected_active' && (
+              <Badge variant="quente" className="shrink-0">
+                ✓ Sincronização Ativa
+              </Badge>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--evo-text)]">
+                URL do Projeto (Project URL)
+              </label>
+              <input
+                type="text"
+                placeholder="https://exemplo.supabase.co"
+                value={supabaseUrl}
+                onChange={(e) => setSupabaseUrl(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-[var(--evo-card)] border border-[var(--evo-border)] text-xs text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] font-mono"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--evo-text)]">
+                Chave Pública (anon / public key)
+              </label>
+              <div className="relative">
+                <input
+                  type={showSupabaseKey ? 'text' : 'password'}
+                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  value={supabaseAnonKey}
+                  onChange={(e) => setSupabaseAnonKey(e.target.value)}
+                  className="w-full pl-3 pr-10 py-2 rounded-lg bg-[var(--evo-card)] border border-[var(--evo-border)] text-xs text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSupabaseKey(!showSupabaseKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--evo-muted)] hover:text-[var(--evo-text)]"
+                >
+                  {showSupabaseKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-[var(--evo-border)]/50">
+            <div>
+              {supabaseFeedback && (
+                <div
+                  className={`text-xs flex items-center gap-1.5 ${
+                    supabaseFeedback.success ? 'text-[#8EB69B]' : 'text-red-400'
+                  }`}
+                >
+                  {supabaseFeedback.success ? (
+                    <CheckCircle2 className="w-4 h-4" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4" />
+                  )}
+                  <span>{supabaseFeedback.message}</span>
+                </div>
+              )}
+            </div>
+
+            <Button
+              variant="primary"
+              size="sm"
+              className="text-xs gap-1.5 w-full sm:w-auto"
+              onClick={handleSaveSupabase}
+              disabled={isSavingSupabase}
+            >
+              {isSavingSupabase ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Save className="w-3.5 h-3.5 text-[#07100F]" />
+              )}
+              <span>{isSavingSupabase ? 'Conectando...' : 'Testar e Salvar Conexão'}</span>
+            </Button>
           </div>
         </div>
 

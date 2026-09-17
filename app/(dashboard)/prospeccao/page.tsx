@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import * as xlsx from 'xlsx';
 import { crmService } from '@/lib/services/crm-service';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -29,13 +30,59 @@ export default function ProspeccaoPage() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [step, setStep] = useState<number>(1);
+  const [importStats, setImportStats] = useState({ total: 0, imported: 0 });
 
-  const handleSimulateUpload = () => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
     setIsProcessing(true);
-    setTimeout(() => {
-      setIsProcessing(false);
-      setStep(2);
-    }, 1200);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = evt.target?.result;
+        const workbook = xlsx.read(data, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonData = xlsx.utils.sheet_to_json(worksheet);
+
+        let importedCount = 0;
+        jsonData.forEach((row: any) => {
+          // Flexible key mapping
+          const name = row['Nome'] || row['Name'] || row['nome'] || row['Contato'] || '';
+          const company = row['Empresa'] || row['Company'] || row['empresa'] || row['Organização'] || name || 'Sem Empresa';
+          const phone = row['Telefone'] || row['WhatsApp'] || row['telefone'] || row['Phone'] || row['Celular'] || '';
+          const segment = row['Nicho'] || row['Segmento'] || row['nicho'] || 'Geral';
+          const email = row['Email'] || row['E-mail'] || row['email'] || '';
+          const city = row['Cidade'] || row['City'] || row['cidade'] || 'Não informada';
+
+          if (company || name) {
+            crmService.addLead({
+              name: name || company,
+              company_name: company,
+              segment: segment,
+              email: email,
+              phone: phone,
+              city: city,
+              temperature: 'frio',
+              status: 'novo',
+              source: 'Importação XLSX/CSV',
+              score: 50,
+            });
+            importedCount++;
+          }
+        });
+
+        setImportStats({ total: jsonData.length, imported: importedCount });
+        setStep(2);
+      } catch (err) {
+        console.error(err);
+        alert('Erro ao ler a planilha. Verifique o formato.');
+      } finally {
+        setIsProcessing(false);
+      }
+    };
+    reader.readAsBinaryString(file);
   };
 
   return (
@@ -236,15 +283,22 @@ export default function ProspeccaoPage() {
         <div className="space-y-5 text-xs">
           {step === 1 && (
             <div className="space-y-4">
-              <div className="p-8 border-2 border-dashed border-[rgba(218,241,222,0.12)] hover:border-[rgba(218,241,222,0.25)] rounded-2xl flex flex-col items-center justify-center text-center bg-[#10201E]/40 cursor-pointer">
+              <label className="relative p-8 border-2 border-dashed border-[rgba(218,241,222,0.12)] hover:border-[rgba(218,241,222,0.25)] rounded-2xl flex flex-col items-center justify-center text-center bg-[#10201E]/40 cursor-pointer overflow-hidden transition-colors w-full">
+                <input 
+                  type="file" 
+                  accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  onChange={handleFileUpload}
+                  disabled={isProcessing}
+                />
                 <FileSpreadsheet className="w-8 h-8 text-[#8EB69B] mb-3" />
                 <span className="text-xs font-medium text-[#E7ECE8] mb-1">
-                  Arraste seu arquivo CSV ou XLSX aqui
+                  {isProcessing ? 'Processando planilha...' : 'Clique ou arraste seu arquivo CSV/XLSX aqui'}
                 </span>
                 <span className="text-[11px] text-[#65706A]">
                   Detecção automática de Nome, Empresa, Telefone, WhatsApp, Cidade e Nicho
                 </span>
-              </div>
+              </label>
 
               <div className="flex justify-end gap-2 pt-2">
                 <Button
@@ -253,9 +307,6 @@ export default function ProspeccaoPage() {
                   onClick={() => setIsUploadModalOpen(false)}
                 >
                   Cancelar
-                </Button>
-                <Button variant="primary" size="sm" onClick={handleSimulateUpload}>
-                  {isProcessing ? 'Processando colunas...' : 'Simular Importação'}
                 </Button>
               </div>
             </div>
@@ -266,10 +317,10 @@ export default function ProspeccaoPage() {
               <div className="p-4 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.06)] space-y-2">
                 <div className="flex items-center gap-2 text-xs font-semibold text-[#8EB69B]">
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>14 novos contatos qualificados e mapeados</span>
+                  <span>{importStats.imported} leads importados com sucesso!</span>
                 </div>
                 <p className="text-[11px] text-[#9BA6A0]">
-                  Detectados: 6 Contabilidade, 5 Clínicas/Saúde, 3 Imobiliárias. Todas as sequências vinculadas.
+                  Foram encontradas {importStats.total} linhas no arquivo e {importStats.imported} novos leads foram adicionados à sua base (ignorando campos vazios).
                 </p>
               </div>
 

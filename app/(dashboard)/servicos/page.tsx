@@ -6,6 +6,7 @@ import { ServiceCategory } from '@/types/database';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { Modal } from '@/components/ui/Modal';
 import {
   Layers,
   Plus,
@@ -18,8 +19,16 @@ import {
 } from 'lucide-react';
 
 export default function ServicosPage() {
-  const services = crmService.getServices();
+  const [services, setServices] = useState(() => crmService.getServices());
   const [selectedCategory, setSelectedCategory] = useState<string>('todos');
+
+  // Modal State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [newServiceName, setNewServiceName] = useState('');
+  const [newServiceCategory, setNewServiceCategory] = useState<ServiceCategory>('WEBSITES');
+  const [newServiceDesc, setNewServiceDesc] = useState('');
+  const [newServicePrice, setNewServicePrice] = useState('');
+  const [newServiceDays, setNewServiceDays] = useState('');
 
   const categories: ('todos' | ServiceCategory)[] = [
     'todos',
@@ -27,6 +36,27 @@ export default function ServicosPage() {
     'AUTOMAÇÃO',
     'PRESENÇA DIGITAL',
   ];
+
+  const handleAddService = () => {
+    if (!newServiceName || !newServicePrice) {
+      alert('Preencha o nome e o preço do serviço.');
+      return;
+    }
+    crmService.addService({
+      name: newServiceName,
+      category: newServiceCategory,
+      description: newServiceDesc || 'Serviço padrão da EvoPixel',
+      base_price: Number(newServicePrice),
+      delivery_time_days: Number(newServiceDays) || 7,
+      checklist: []
+    });
+    setServices([...crmService.getServices()]);
+    setIsModalOpen(false);
+    setNewServiceName('');
+    setNewServiceDesc('');
+    setNewServicePrice('');
+    setNewServiceDays('');
+  };
 
   const filteredServices = services.filter((s) => {
     if (selectedCategory === 'todos') return true;
@@ -50,7 +80,7 @@ export default function ServicosPage() {
           </p>
         </div>
 
-        <Button variant="primary" size="sm" className="gap-1.5">
+        <Button variant="primary" size="sm" className="gap-1.5" onClick={() => setIsModalOpen(true)}>
           <Plus className="w-3.5 h-3.5 text-[#07100F]" />
           <span>Cadastrar Serviço</span>
         </Button>
@@ -114,6 +144,79 @@ export default function ServicosPage() {
           </div>
         ))}
       </div>
+
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title="Cadastrar Novo Serviço"
+        subtitle="Adicione um novo serviço ao catálogo da EvoPixel."
+      >
+        <div className="space-y-4 text-xs">
+          <div>
+            <label className="block text-[#9BA6A0] mb-1">Nome do Serviço</label>
+            <input
+              type="text"
+              value={newServiceName}
+              onChange={(e) => setNewServiceName(e.target.value)}
+              placeholder="Ex: Landing Page"
+              className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-[#9BA6A0] mb-1">Categoria</label>
+            <select
+              value={newServiceCategory}
+              onChange={(e) => setNewServiceCategory(e.target.value as ServiceCategory)}
+              className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+            >
+              <option value="WEBSITES">Websites</option>
+              <option value="AUTOMAÇÃO">Automação</option>
+              <option value="PRESENÇA DIGITAL">Presença Digital</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[#9BA6A0] mb-1">Descrição</label>
+            <input
+              type="text"
+              value={newServiceDesc}
+              onChange={(e) => setNewServiceDesc(e.target.value)}
+              placeholder="Ex: Desenvolvimento web de alta performance..."
+              className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[#9BA6A0] mb-1">Preço Base (R$)</label>
+              <input
+                type="number"
+                value={newServicePrice}
+                onChange={(e) => setNewServicePrice(e.target.value)}
+                placeholder="Ex: 3200"
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[#9BA6A0] mb-1">Prazo (Dias)</label>
+              <input
+                type="number"
+                value={newServiceDays}
+                onChange={(e) => setNewServiceDays(e.target.value)}
+                placeholder="Ex: 14"
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t border-[rgba(218,241,222,0.06)]">
+            <Button variant="secondary" size="sm" onClick={() => setIsModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleAddService}>
+              Salvar Serviço
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

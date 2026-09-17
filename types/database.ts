@@ -380,7 +380,7 @@ export interface AIActionLog {
   user_id?: string;
   command_id?: string;
   action_type: 'create' | 'update' | 'delete' | 'register_payment';
-  entity_type: 'lead' | 'client' | 'opportunity' | 'task' | 'payment' | 'prospect';
+  entity_type: 'lead' | 'client' | 'opportunity' | 'task' | 'payment' | 'prospect' | 'contract' | 'proposal';
   entity_id: string;
   entity_label?: string;
   before_data?: Record<string, unknown>;
@@ -424,4 +424,22 @@ export interface EvoInsightItem {
     link: string;
   };
 }
+
+export interface MonthlyClient {
+  id: string;
+  client_id?: string;
+  client_name: string;
+  company_name: string;
+  segment: string;
+  plan_name: string; // Ex: 'Suporte & Manutenção Web', 'Gestão IA & Automação n8n', 'Hospedagem & SEO'
+  monthly_value: number; // R$ valor da mensalidade
+  billing_day: number; // Dia de vencimento no mês (1 a 31)
+  payment_method: 'pix' | 'boleto' | 'cartao' | 'transferencia';
+  status: 'ativo' | 'inadimplente' | 'pausado' | 'cancelado';
+  current_month_status: 'pago' | 'pendente' | 'atrasado';
+  start_date: string;
+  last_payment_date?: string;
+  notes?: string;
+}
+
 

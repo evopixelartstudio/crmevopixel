@@ -1,14 +1,22 @@
 'use client';
 
-import React from 'react';
-import { Search, Bell, Sparkles, Activity } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { Search, Bell, Sparkles, Activity, Database } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { isSupabaseConfigured } from '@/lib/supabase/client';
 
 interface TopbarProps {
   onOpenSearch?: () => void;
 }
 
 export function Topbar({ onOpenSearch }: TopbarProps) {
+  const [configured, setConfigured] = useState(false);
+
+  useEffect(() => {
+    setConfigured(isSupabaseConfigured());
+  }, []);
+
   return (
     <header className="h-16 border-b border-[var(--evo-border)] bg-[var(--evo-bg)]/95 backdrop-blur-md px-6 flex items-center justify-between sticky top-0 z-20 transition-colors duration-200">
       {/* Busca Global (Command Palette Trigger) */}
@@ -24,12 +32,26 @@ export function Topbar({ onOpenSearch }: TopbarProps) {
           </kbd>
         </button>
 
-        {/* Status discreto n8n / webhook */}
-        <div className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-lg bg-[var(--evo-card)] border border-[var(--evo-border)] text-[11px] text-[var(--evo-muted)]">
-          <span className="w-2 h-2 rounded-full bg-[#8EB69B] animate-pulse" />
-          <span className="font-medium text-[var(--evo-text)]">n8n & Evolution API:</span>
-          <span className="text-[#8EB69B]">Pronto para conexão</span>
-        </div>
+        {/* Status Supabase */}
+        <Link
+          href="/configuracoes"
+          className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-lg bg-[var(--evo-card)] border border-[var(--evo-border)] text-[11px] text-[var(--evo-muted)] hover:border-[var(--evo-border-hover)] transition-colors"
+          title="Clique para gerenciar a conexão com o Supabase"
+        >
+          <Database className="w-3.5 h-3.5 text-[#8EB69B]" />
+          <span className="font-medium text-[var(--evo-text)]">Supabase:</span>
+          {configured ? (
+            <span className="text-[#8EB69B] flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#8EB69B] animate-pulse" />
+              Conectado
+            </span>
+          ) : (
+            <span className="text-[#F1F9A1] flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#F1F9A1]" />
+              Conectar
+            </span>
+          )}
+        </Link>
       </div>
 
       {/* Ações & Perfil */}
