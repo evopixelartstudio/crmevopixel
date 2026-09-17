@@ -436,6 +436,21 @@ class CrmService {
     return newService;
   }
 
+  public updateService(id: string, serviceData: Partial<Service>): boolean {
+    const index = this.services.findIndex(s => s.id === id);
+    if (index !== -1) {
+      this.services[index] = { ...this.services[index], ...serviceData };
+      return true;
+    }
+    return false;
+  }
+
+  public deleteService(id: string): boolean {
+    const initialLength = this.services.length;
+    this.services = this.services.filter(s => s.id !== id);
+    return this.services.length < initialLength;
+  }
+
   // Clientes
   public getClients(): Client[] {
     return this.clients;

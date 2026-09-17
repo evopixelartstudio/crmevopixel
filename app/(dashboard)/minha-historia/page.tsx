@@ -7,6 +7,7 @@ import { useCrmSync } from '@/lib/hooks/useCrmSync';
 import { Button } from '@/components/ui/Button';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { Modal } from '@/components/ui/Modal';
 import {
   History,
   TrendingUp,
@@ -17,15 +18,50 @@ import {
   DollarSign,
   ArrowUpRight,
   Sparkles,
+  Plus,
 } from 'lucide-react';
 
 export default function MinhaHistoriaPage() {
   useCrmSync();
-  const data = crmService.getMinhaHistoriaData();
+  // Using state for data and historicalProjects to trigger re-renders
+  const [data, setData] = useState(() => crmService.getMinhaHistoriaData());
+  const [historicalProjects, setHistoricalProjects] = useState(() => crmService.getHistoricalProjects());
   const [metricMode, setMetricMode] = useState<'recebido' | 'contratado' | 'pendente'>('recebido');
   const [periodFilter, setPeriodFilter] = useState<'ano' | 'mes'>('ano');
 
-  const historicalProjects = crmService.getHistoricalProjects();
+  // Modal State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [hCompany, setHCompany] = useState('');
+  const [hClient, setHClient] = useState('');
+  const [hServices, setHServices] = useState('');
+  const [hDate, setHDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [hContracted, setHContracted] = useState('');
+  const [hReceived, setHReceived] = useState('');
+
+  const handleAddHistorical = () => {
+    if (!hCompany || !hContracted || !hReceived) {
+      alert('Preencha a Empresa, Valor Contratado e Recebido.');
+      return;
+    }
+    crmService.addHistoricalProject({
+      company_name: hCompany,
+      client_name: hClient || 'N/A',
+      services_summary: hServices || 'Serviços Gerais',
+      project_date: hDate,
+      amount_contracted: Number(hContracted),
+      amount_received: Number(hReceived),
+      amount_pending: Number(hContracted) - Number(hReceived),
+      status: Number(hContracted) <= Number(hReceived) ? 'liquidado' : 'pendente'
+    });
+    setHistoricalProjects([...crmService.getHistoricalProjects()]);
+    setData(crmService.getMinhaHistoriaData());
+    setIsModalOpen(false);
+    setHCompany('');
+    setHClient('');
+    setHServices('');
+    setHContracted('');
+    setHReceived('');
+  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
@@ -40,9 +76,21 @@ export default function MinhaHistoriaPage() {
             Desde o Início da EvoPixel
           </div>
 
-          <h1 className="text-3xl sm:text-4xl md:text-5xl font-semibold text-[#E7ECE8] font-heading tracking-tight">
-            Meu Histórico
-          </h1>
+          <div className="flex items-center justify-between">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl font-semibold text-[#E7ECE8] font-heading tracking-tight">
+              Meu Histórico
+            </h1>
+            <Button variant="primary" size="sm" className="gap-1.5 z-20 relative hidden sm:flex" onClick={() => setIsModalOpen(true)}>
+              <Plus className="w-3.5 h-3.5 text-[#07100F]" />
+              <span>Adicionar Histórico</span>
+            </Button>
+          </div>
+          <div className="sm:hidden mt-2 z-20 relative">
+            <Button variant="primary" size="sm" className="gap-1.5 w-full" onClick={() => setIsModalOpen(true)}>
+              <Plus className="w-3.5 h-3.5 text-[#07100F]" />
+              <span>Adicionar Histórico</span>
+            </Button>
+          </div>
 
           <div className="pt-2">
             <div className="text-4xl sm:text-5xl md:text-6xl font-bold font-heading text-[#F1F9A1] tracking-tight">
@@ -297,6 +345,88 @@ export default function MinhaHistoriaPage() {
           </div>
         )}
       </Card>
+
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title="Novo Registro Histórico"
+        subtitle="Cadastre um cliente antigo para compor seu faturamento acumulado."
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Empresa Contratante *</label>
+              <input
+                type="text"
+                value={hCompany}
+                onChange={(e) => setHCompany(e.target.value)}
+                placeholder="Ex: Clínica Alpha"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Nome do Cliente</label>
+              <input
+                type="text"
+                value={hClient}
+                onChange={(e) => setHClient(e.target.value)}
+                placeholder="Ex: Dr. Roberto"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Serviços Realizados</label>
+            <input
+              type="text"
+              value={hServices}
+              onChange={(e) => setHServices(e.target.value)}
+              placeholder="Ex: Identidade Visual + Website"
+              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Data (Mês/Ano) *</label>
+              <input
+                type="date"
+                value={hDate}
+                onChange={(e) => setHDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Contratado (R$) *</label>
+              <input
+                type="number"
+                value={hContracted}
+                onChange={(e) => setHContracted(e.target.value)}
+                placeholder="Ex: 5000"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Recebido (R$) *</label>
+              <input
+                type="number"
+                value={hReceived}
+                onChange={(e) => setHReceived(e.target.value)}
+                placeholder="Ex: 5000"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+          </div>
+          <div className="pt-4 border-t border-[var(--evo-border)] flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setIsModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleAddHistorical}>
+              Adicionar ao Histórico
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

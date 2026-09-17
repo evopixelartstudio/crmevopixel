@@ -24,6 +24,7 @@ export default function ServicosPage() {
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [newServiceName, setNewServiceName] = useState('');
   const [newServiceCategory, setNewServiceCategory] = useState<ServiceCategory>('WEBSITES');
   const [newServiceDesc, setNewServiceDesc] = useState('');
@@ -37,25 +38,61 @@ export default function ServicosPage() {
     'PRESENÇA DIGITAL',
   ];
 
-  const handleAddService = () => {
+  const handleOpenEdit = (service: any) => {
+    setEditingServiceId(service.id);
+    setNewServiceName(service.name);
+    setNewServiceCategory(service.category);
+    setNewServiceDesc(service.description);
+    setNewServicePrice(service.base_price.toString());
+    setNewServiceDays(service.delivery_time_days?.toString() || '');
+    setIsModalOpen(true);
+  };
+
+  const handleOpenCreate = () => {
+    setEditingServiceId(null);
+    setNewServiceName('');
+    setNewServiceCategory('WEBSITES');
+    setNewServiceDesc('');
+    setNewServicePrice('');
+    setNewServiceDays('');
+    setIsModalOpen(true);
+  };
+
+  const handleDeleteService = () => {
+    if (editingServiceId && confirm('Tem certeza que deseja excluir este serviço?')) {
+      crmService.deleteService(editingServiceId);
+      setServices([...crmService.getServices()]);
+      setIsModalOpen(false);
+    }
+  };
+
+  const handleSaveService = () => {
     if (!newServiceName || !newServicePrice) {
       alert('Preencha o nome e o preço do serviço.');
       return;
     }
-    crmService.addService({
-      name: newServiceName,
-      category: newServiceCategory,
-      description: newServiceDesc || 'Serviço padrão da EvoPixel',
-      base_price: Number(newServicePrice),
-      delivery_time_days: Number(newServiceDays) || 7,
-      checklist: []
-    });
+    
+    if (editingServiceId) {
+      crmService.updateService(editingServiceId, {
+        name: newServiceName,
+        category: newServiceCategory,
+        description: newServiceDesc || 'Serviço padrão da EvoPixel',
+        base_price: Number(newServicePrice),
+        delivery_time_days: Number(newServiceDays) || 7,
+      });
+    } else {
+      crmService.addService({
+        name: newServiceName,
+        category: newServiceCategory,
+        description: newServiceDesc || 'Serviço padrão da EvoPixel',
+        base_price: Number(newServicePrice),
+        delivery_time_days: Number(newServiceDays) || 7,
+        checklist: []
+      });
+    }
+    
     setServices([...crmService.getServices()]);
     setIsModalOpen(false);
-    setNewServiceName('');
-    setNewServiceDesc('');
-    setNewServicePrice('');
-    setNewServiceDays('');
   };
 
   const filteredServices = services.filter((s) => {
@@ -80,7 +117,7 @@ export default function ServicosPage() {
           </p>
         </div>
 
-        <Button variant="primary" size="sm" className="gap-1.5" onClick={() => setIsModalOpen(true)}>
+        <Button variant="primary" size="sm" className="gap-1.5" onClick={handleOpenCreate}>
           <Plus className="w-3.5 h-3.5 text-[#07100F]" />
           <span>Cadastrar Serviço</span>
         </Button>
@@ -137,7 +174,7 @@ export default function ServicosPage() {
                 </div>
               </div>
 
-              <Button variant="secondary" size="sm" className="text-xs h-7 px-2.5">
+              <Button variant="secondary" size="sm" className="text-xs h-7 px-2.5" onClick={() => handleOpenEdit(service)}>
                 Editar
               </Button>
             </div>
@@ -148,8 +185,8 @@ export default function ServicosPage() {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title="Cadastrar Novo Serviço"
-        subtitle="Adicione um novo serviço ao catálogo da EvoPixel."
+        title={editingServiceId ? 'Editar Serviço' : 'Cadastrar Novo Serviço'}
+        subtitle={editingServiceId ? 'Altere as informações do serviço' : 'Adicione um novo serviço ao catálogo da EvoPixel.'}
       >
         <div className="space-y-4 text-xs">
           <div>
@@ -207,13 +244,20 @@ export default function ServicosPage() {
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 pt-4 border-t border-[rgba(218,241,222,0.06)]">
-            <Button variant="secondary" size="sm" onClick={() => setIsModalOpen(false)}>
-              Cancelar
-            </Button>
-            <Button variant="primary" size="sm" onClick={handleAddService}>
-              Salvar Serviço
-            </Button>
+          <div className={`flex ${editingServiceId ? 'justify-between' : 'justify-end'} gap-2 pt-4 border-t border-[rgba(218,241,222,0.06)]`}>
+            {editingServiceId && (
+              <Button variant="outline" size="sm" className="text-red-400 hover:text-red-300 border-red-900/30 hover:bg-red-900/20" onClick={handleDeleteService}>
+                Excluir
+              </Button>
+            )}
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setIsModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button variant="primary" size="sm" onClick={handleSaveService}>
+                Salvar Serviço
+              </Button>
+            </div>
           </div>
         </div>
       </Modal>

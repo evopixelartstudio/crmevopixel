@@ -131,6 +131,74 @@ export default function ContratosPage() {
           </div>
         ))}
       </div>
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title="Gerar Novo Contrato"
+        subtitle="Preencha os dados básicos para gerar a minuta do contrato"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Empresa Contratante *</label>
+            <input
+              type="text"
+              value={cCompany}
+              onChange={(e) => setCCompany(e.target.value)}
+              placeholder="Ex: Clínica Vida"
+              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Nome do Cliente Responsável</label>
+            <input
+              type="text"
+              value={cClient}
+              onChange={(e) => setCClient(e.target.value)}
+              placeholder="Ex: Dr. João Silva"
+              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Resumo dos Serviços (Escopo)</label>
+            <textarea
+              value={cServices}
+              onChange={(e) => setCServices(e.target.value)}
+              placeholder="Ex: Site Institucional + Automação de Agendamentos WhatsApp"
+              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs min-h-[80px]"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Valor Total (R$) *</label>
+              <input
+                type="number"
+                value={cAmount}
+                onChange={(e) => setCAmount(e.target.value)}
+                placeholder="Ex: 5000"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Data de Início</label>
+              <input
+                type="date"
+                value={cDate}
+                onChange={(e) => setCDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+          </div>
+          <div className="pt-4 border-t border-[var(--evo-border)] flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setIsModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleAddContract}>
+              Gerar Contrato
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

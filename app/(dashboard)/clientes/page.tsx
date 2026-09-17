@@ -80,7 +80,7 @@ export default function ClientesPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          <Button variant="primary" size="sm" className="gap-1.5">
+          <Button onClick={() => setIsModalOpen(true)} variant="primary" size="sm" className="gap-1.5">
             <Plus className="w-3.5 h-3.5 text-[#07100F]" />
             <span>Novo Cliente</span>
           </Button>
@@ -171,6 +171,77 @@ export default function ClientesPage() {
           </div>
         ))}
       </div>
+
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title="Cadastrar Novo Cliente"
+        subtitle="Preencha os dados básicos do novo cliente"
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Nome do Cliente *</label>
+            <input
+              type="text"
+              value={cName}
+              onChange={(e) => setCName(e.target.value)}
+              placeholder="Ex: João Silva"
+              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Empresa *</label>
+            <input
+              type="text"
+              value={cCompany}
+              onChange={(e) => setCCompany(e.target.value)}
+              placeholder="Ex: Clínica Vida"
+              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Segmento / Nicho</label>
+            <input
+              type="text"
+              value={cSegment}
+              onChange={(e) => setCSegment(e.target.value)}
+              placeholder="Ex: Odontologia"
+              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">E-mail</label>
+              <input
+                type="email"
+                value={cEmail}
+                onChange={(e) => setCEmail(e.target.value)}
+                placeholder="contato@empresa.com"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Telefone/WhatsApp</label>
+              <input
+                type="text"
+                value={cPhone}
+                onChange={(e) => setCPhone(e.target.value)}
+                placeholder="(00) 00000-0000"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+          </div>
+          <div className="pt-4 border-t border-[var(--evo-border)] flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setIsModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleAddClient}>
+              Salvar Cliente
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

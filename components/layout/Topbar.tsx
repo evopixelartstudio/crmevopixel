@@ -32,26 +32,7 @@ export function Topbar({ onOpenSearch }: TopbarProps) {
           </kbd>
         </button>
 
-        {/* Status Supabase */}
-        <Link
-          href="/configuracoes"
-          className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-lg bg-[var(--evo-card)] border border-[var(--evo-border)] text-[11px] text-[var(--evo-muted)] hover:border-[var(--evo-border-hover)] transition-colors"
-          title="Clique para gerenciar a conexão com o Supabase"
-        >
-          <Database className="w-3.5 h-3.5 text-[#8EB69B]" />
-          <span className="font-medium text-[var(--evo-text)]">Supabase:</span>
-          {configured ? (
-            <span className="text-[#8EB69B] flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#8EB69B] animate-pulse" />
-              Conectado
-            </span>
-          ) : (
-            <span className="text-[#F1F9A1] flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#F1F9A1]" />
-              Conectar
-            </span>
-          )}
-        </Link>
+
       </div>
 
       {/* Ações & Perfil */}
@@ -59,11 +40,7 @@ export function Topbar({ onOpenSearch }: TopbarProps) {
         {/* Alternador de Tema Dark / Claro */}
         <ThemeToggle />
 
-        {/* Notificações */}
-        <button className="relative p-2 rounded-xl text-[var(--evo-muted)] hover:text-[var(--evo-text)] hover:bg-[var(--evo-card)] border border-transparent hover:border-[var(--evo-border)] transition-all">
-          <Bell className="w-4 h-4" />
-          <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-[#F1F9A1]" />
-        </button>
+
 
         <div className="h-4 w-[1px] bg-[var(--evo-border)] mx-1" />
 

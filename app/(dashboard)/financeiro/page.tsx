@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { MetricCard } from '@/components/ui/MetricCard';
+import { Modal } from '@/components/ui/Modal';
 import {
   DollarSign,
   TrendingUp,
@@ -20,10 +21,42 @@ import {
 } from 'lucide-react';
 
 export default function FinanceiroPage() {
-  const transactions = crmService.getFinancialTransactions();
+  const [transactions, setTransactions] = useState(() => crmService.getFinancialTransactions());
   const summary = crmService.getFinancialSummary();
 
   const [filterStatus, setFilterStatus] = useState<string>('todos');
+
+  // Modal State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [fTitle, setFTitle] = useState('');
+  const [fClient, setFClient] = useState('');
+  const [fCategory, setFCategory] = useState('');
+  const [fAmount, setFAmount] = useState('');
+  const [fDueDate, setFDueDate] = useState('');
+
+  const handleAddTx = () => {
+    if (!fTitle || !fAmount || !fClient) {
+      alert('Preencha o Título, o Cliente e o Valor.');
+      return;
+    }
+    crmService.addFinancialTransaction({
+      title: fTitle,
+      client_name: fClient,
+      category: fCategory || 'Geral',
+      amount_contracted: Number(fAmount),
+      amount_received: 0,
+      amount_pending: Number(fAmount),
+      due_date: fDueDate || new Date().toISOString().split('T')[0],
+      status: 'pendente'
+    });
+    setTransactions([...crmService.getFinancialTransactions()]);
+    setIsModalOpen(false);
+    setFTitle('');
+    setFClient('');
+    setFCategory('');
+    setFAmount('');
+    setFDueDate('');
+  };
 
   const filteredTransactions = transactions.filter((t) => {
     if (filterStatus === 'todos') return true;
@@ -53,7 +86,7 @@ export default function FinanceiroPage() {
               <span>Meu Histórico</span>
             </Button>
           </Link>
-          <Button variant="primary" size="sm" className="gap-1.5">
+          <Button variant="primary" size="sm" className="gap-1.5" onClick={() => setIsModalOpen(true)}>
             <Plus className="w-3.5 h-3.5 text-[#07100F]" />
             <span>Novo Lançamento</span>
           </Button>
@@ -209,6 +242,76 @@ export default function FinanceiroPage() {
           </div>
         )}
       </Card>
+
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        title="Novo Lançamento Financeiro"
+        subtitle="Adicione uma nova receita ou parcela a receber no sistema."
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Título do Lançamento *</label>
+            <input
+              type="text"
+              value={fTitle}
+              onChange={(e) => setFTitle(e.target.value)}
+              placeholder="Ex: Parcela 1/3 - Desenvolvimento Web"
+              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Nome do Cliente / Empresa *</label>
+            <input
+              type="text"
+              value={fClient}
+              onChange={(e) => setFClient(e.target.value)}
+              placeholder="Ex: Clínica Vida"
+              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Valor Contratado (R$) *</label>
+              <input
+                type="number"
+                value={fAmount}
+                onChange={(e) => setFAmount(e.target.value)}
+                placeholder="Ex: 1500"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Data de Vencimento</label>
+              <input
+                type="date"
+                value={fDueDate}
+                onChange={(e) => setFDueDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Categoria</label>
+            <input
+              type="text"
+              value={fCategory}
+              onChange={(e) => setFCategory(e.target.value)}
+              placeholder="Ex: Desenvolvimento Web"
+              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+            />
+          </div>
+          <div className="pt-4 border-t border-[var(--evo-border)] flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setIsModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleAddTx}>
+              Registrar Lançamento
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
