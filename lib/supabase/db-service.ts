@@ -40,7 +40,14 @@ export class DatabaseService {
     if (!isSupabaseConfigured()) return false;
     try {
       const supabase = getSupabase();
-      const { error } = await supabase.from('clients').upsert([client]);
+      
+      // Remover ID mock (ex: 'client-...') para que o Supabase gere o UUID
+      let dataToInsert = { ...client };
+      if (dataToInsert.id && dataToInsert.id.startsWith('client-')) {
+        delete (dataToInsert as any).id;
+      }
+
+      const { error } = await supabase.from('clients').upsert([dataToInsert]);
       if (error) console.error('Supabase insertClient error:', error);
       return !error;
     } catch (err) {
@@ -53,7 +60,14 @@ export class DatabaseService {
     if (!isSupabaseConfigured()) return false;
     try {
       const supabase = getSupabase();
-      const { error } = await supabase.from('clients').update(data).eq('id', id);
+      
+      // Remover ID mock
+      let dataToUpdate = { ...data };
+      if (dataToUpdate.id && dataToUpdate.id.startsWith('client-')) {
+        delete (dataToUpdate as any).id;
+      }
+
+      const { error } = await supabase.from('clients').update(dataToUpdate).eq('id', id);
       return !error;
     } catch {
       return false;
@@ -426,7 +440,14 @@ export class DatabaseService {
     if (!isSupabaseConfigured()) return false;
     try {
       const supabase = getSupabase();
-      const { error } = await supabase.from('historical_projects').upsert([project]);
+
+      // Remover ID mock (ex: 'hist-...') para que o Supabase gere o UUID
+      let dataToInsert = { ...project };
+      if (dataToInsert.id && dataToInsert.id.startsWith('hist-')) {
+        delete (dataToInsert as any).id;
+      }
+
+      const { error } = await supabase.from('historical_projects').upsert([dataToInsert]);
       if (error) console.error('Supabase insertHistoricalProject error:', error);
       return !error;
     } catch (err) {
@@ -439,7 +460,14 @@ export class DatabaseService {
     if (!isSupabaseConfigured()) return false;
     try {
       const supabase = getSupabase();
-      const { error } = await supabase.from('historical_projects').update(data).eq('id', id);
+
+      // Remover ID mock
+      let dataToUpdate = { ...data };
+      if (dataToUpdate.id && dataToUpdate.id.startsWith('hist-')) {
+        delete (dataToUpdate as any).id;
+      }
+
+      const { error } = await supabase.from('historical_projects').update(dataToUpdate).eq('id', id);
       return !error;
     } catch {
       return false;
