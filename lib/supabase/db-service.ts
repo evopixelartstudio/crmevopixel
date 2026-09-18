@@ -25,9 +25,13 @@ export class DatabaseService {
         .from('clients')
         .select('*')
         .order('created_at', { ascending: false });
-      if (error || !data) return null;
+      if (error || !data) {
+        console.error('Supabase getClients error:', error);
+        return null;
+      }
       return data as Client[];
-    } catch {
+    } catch (err) {
+      console.error('Supabase getClients exception:', err);
       return null;
     }
   }
@@ -37,8 +41,10 @@ export class DatabaseService {
     try {
       const supabase = getSupabase();
       const { error } = await supabase.from('clients').upsert([client]);
+      if (error) console.error('Supabase insertClient error:', error);
       return !error;
-    } catch {
+    } catch (err) {
+      console.error('Supabase insertClient exception:', err);
       return false;
     }
   }
@@ -405,9 +411,13 @@ export class DatabaseService {
         .from('historical_projects')
         .select('*')
         .order('project_date', { ascending: false });
-      if (error || !data) return null;
+      if (error || !data) {
+        console.error('Supabase getHistoricalProjects error:', error);
+        return null;
+      }
       return data as HistoricalProject[];
-    } catch {
+    } catch (err) {
+      console.error('Supabase getHistoricalProjects exception:', err);
       return null;
     }
   }
@@ -417,8 +427,10 @@ export class DatabaseService {
     try {
       const supabase = getSupabase();
       const { error } = await supabase.from('historical_projects').upsert([project]);
+      if (error) console.error('Supabase insertHistoricalProject error:', error);
       return !error;
-    } catch {
+    } catch (err) {
+      console.error('Supabase insertHistoricalProject exception:', err);
       return false;
     }
   }
