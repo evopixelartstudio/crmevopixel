@@ -16,6 +16,8 @@ import {
   Phone,
   Mail,
   Layers,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 
@@ -29,25 +31,68 @@ export default function ClientesPage() {
   const [cSegment, setCSegment] = useState('');
   const [cEmail, setCEmail] = useState('');
   const [cPhone, setCPhone] = useState('');
+  const [editId, setEditId] = useState<string | null>(null);
 
   const handleAddClient = () => {
     if (!cCompany || !cName) {
       alert('Preencha ao menos o Nome e a Empresa.');
       return;
     }
-    crmService.addClient({
+
+    const payload = {
       name: cName,
       company_name: cCompany,
       segment: cSegment || 'Geral',
       projects_count: 0,
       lifetime_value: 0,
       total_pending: 0,
+      total_contracted: 0,
+      total_received: 0,
+      status: 'ativo' as const,
       cross_sell_opportunities: [],
       phone: cPhone,
       email: cEmail,
-    });
+    };
+
+    if (editId) {
+      // Retain the existing numbers
+      const existingClient = clients.find(c => c.id === editId);
+      crmService.updateClient(editId, {
+        ...payload,
+        projects_count: existingClient?.projects_count || 0,
+        lifetime_value: existingClient?.lifetime_value || 0,
+        total_pending: existingClient?.total_pending || 0,
+        total_contracted: existingClient?.total_contracted || 0,
+        total_received: existingClient?.total_received || 0,
+      });
+    } else {
+      crmService.addClient(payload);
+    }
+    
     setClients([...crmService.getClients()]);
+    closeModal();
+  };
+
+  const handleEdit = (client: any) => {
+    setEditId(client.id);
+    setCName(client.name);
+    setCCompany(client.company_name);
+    setCSegment(client.segment);
+    setCEmail(client.email || '');
+    setCPhone(client.phone || '');
+    setIsModalOpen(true);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este cliente?')) {
+      crmService.deleteClient(id);
+      setClients([...crmService.getClients()]);
+    }
+  };
+
+  const closeModal = () => {
     setIsModalOpen(false);
+    setEditId(null);
     setCName('');
     setCCompany('');
     setCSegment('');
@@ -116,10 +161,22 @@ export default function ClientesPage() {
                 </span>
               </div>
 
-              <h3 className="text-base font-semibold text-[#E7ECE8] font-heading group-hover:text-[#F1F9A1] transition-colors">
-                {client.company_name}
-              </h3>
-              <p className="text-xs text-[#9BA6A0] mt-0.5">{client.name}</p>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-base font-semibold text-[#E7ECE8] font-heading group-hover:text-[#F1F9A1] transition-colors">
+                    {client.company_name}
+                  </h3>
+                  <p className="text-xs text-[#9BA6A0] mt-0.5">{client.name}</p>
+                </div>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => handleEdit(client)} className="p-1.5 rounded bg-[#10201E] text-[#8EB69B] hover:text-[#E7ECE8]">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => handleDelete(client.id)} className="p-1.5 rounded bg-[#10201E] text-red-400 hover:text-red-300">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
 
               {/* LTV & Indicadores Financeiros */}
               <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-[rgba(218,241,222,0.06)] text-xs">
@@ -174,9 +231,9 @@ export default function ClientesPage() {
 
       <Modal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title="Cadastrar Novo Cliente"
-        subtitle="Preencha os dados básicos do novo cliente"
+        onClose={closeModal}
+        title={editId ? "Editar Cliente" : "Cadastrar Novo Cliente"}
+        subtitle={editId ? "Altere os dados básicos do cliente" : "Preencha os dados básicos do novo cliente"}
         maxWidth="md"
       >
         <div className="space-y-4">
@@ -233,11 +290,11 @@ export default function ClientesPage() {
             </div>
           </div>
           <div className="pt-4 border-t border-[var(--evo-border)] flex justify-end gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setIsModalOpen(false)}>
+            <Button variant="secondary" size="sm" onClick={closeModal}>
               Cancelar
             </Button>
             <Button variant="primary" size="sm" onClick={handleAddClient}>
-              Salvar Cliente
+              {editId ? "Salvar Alterações" : "Salvar Cliente"}
             </Button>
           </div>
         </div>

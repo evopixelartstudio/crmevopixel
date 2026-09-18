@@ -601,8 +601,57 @@ class CrmService {
     };
     this.historicalProjects.unshift(newProject);
     dbService.insertHistoricalProject(newProject);
+    this.syncClientWithHistoricalProject(newProject);
     this.notify();
     return newProject;
+  }
+
+  public updateHistoricalProject(id: string, data: Partial<HistoricalProject>): HistoricalProject | undefined {
+    const proj = this.historicalProjects.find(p => p.id === id);
+    if (proj) {
+      Object.assign(proj, data);
+      dbService.updateHistoricalProject(id, data);
+      this.syncClientWithHistoricalProject(proj);
+      this.notify();
+    }
+    return proj;
+  }
+
+  public deleteHistoricalProject(id: string): void {
+    this.historicalProjects = this.historicalProjects.filter(p => p.id !== id);
+    dbService.deleteHistoricalProject(id);
+    this.notify();
+  }
+
+  private syncClientWithHistoricalProject(proj: HistoricalProject) {
+    let client = this.clients.find(
+      c => c.company_name.toLowerCase() === proj.company_name.toLowerCase() || 
+           (c.name && proj.client_name && c.name.toLowerCase() === proj.client_name.toLowerCase())
+    );
+
+    if (!client) {
+      this.addClient({
+        name: proj.client_name || 'N/A',
+        company_name: proj.company_name,
+        segment: 'Geral',
+        status: 'ativo',
+        total_contracted: proj.amount_contracted || 0,
+        total_received: proj.amount_received || 0,
+        total_pending: proj.amount_pending || 0,
+        lifetime_value: proj.amount_received || 0,
+        projects_count: 1,
+        last_project_at: proj.project_date,
+      });
+    } else {
+      const histProjects = this.historicalProjects.filter(p => p.company_name.toLowerCase() === client!.company_name.toLowerCase());
+      client.total_contracted = histProjects.reduce((sum, p) => sum + (p.amount_contracted || 0), 0);
+      client.total_received = histProjects.reduce((sum, p) => sum + (p.amount_received || 0), 0);
+      client.total_pending = histProjects.reduce((sum, p) => sum + (p.amount_pending || 0), 0);
+      client.lifetime_value = client.total_received;
+      client.projects_count = histProjects.length;
+      client.last_project_at = proj.project_date;
+      dbService.updateClient(client.id, client);
+    }
   }
 
   public getHistoricalProjects(): HistoricalProject[] {

@@ -19,6 +19,8 @@ import {
   ArrowUpRight,
   Sparkles,
   Plus,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 
 export default function MinhaHistoriaPage() {
@@ -37,13 +39,15 @@ export default function MinhaHistoriaPage() {
   const [hDate, setHDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [hContracted, setHContracted] = useState('');
   const [hReceived, setHReceived] = useState('');
+  const [editId, setEditId] = useState<string | null>(null);
 
   const handleAddHistorical = () => {
     if (!hCompany || !hContracted || !hReceived) {
       alert('Preencha a Empresa, Valor Contratado e Recebido.');
       return;
     }
-    crmService.addHistoricalProject({
+
+    const payload = {
       company_name: hCompany,
       client_name: hClient || 'N/A',
       services_summary: hServices || 'Serviços Gerais',
@@ -51,11 +55,42 @@ export default function MinhaHistoriaPage() {
       amount_contracted: Number(hContracted),
       amount_received: Number(hReceived),
       amount_pending: Number(hContracted) - Number(hReceived),
-      status: Number(hContracted) <= Number(hReceived) ? 'liquidado' : 'pendente'
-    });
+      status: (Number(hContracted) <= Number(hReceived) ? 'liquidado' : 'pendente') as any
+    };
+
+    if (editId) {
+      crmService.updateHistoricalProject(editId, payload);
+    } else {
+      crmService.addHistoricalProject(payload);
+    }
+
     setHistoricalProjects([...crmService.getHistoricalProjects()]);
     setData(crmService.getMinhaHistoriaData());
+    closeModal();
+  };
+
+  const handleEdit = (hp: any) => {
+    setEditId(hp.id);
+    setHCompany(hp.company_name);
+    setHClient(hp.client_name);
+    setHServices(hp.services_summary);
+    setHDate(hp.project_date);
+    setHContracted(String(hp.amount_contracted));
+    setHReceived(String(hp.amount_received));
+    setIsModalOpen(true);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este registro?')) {
+      crmService.deleteHistoricalProject(id);
+      setHistoricalProjects([...crmService.getHistoricalProjects()]);
+      setData(crmService.getMinhaHistoriaData());
+    }
+  };
+
+  const closeModal = () => {
     setIsModalOpen(false);
+    setEditId(null);
     setHCompany('');
     setHClient('');
     setHServices('');
@@ -314,6 +349,7 @@ export default function MinhaHistoriaPage() {
                   <th className="py-2.5 px-3">Contratado</th>
                   <th className="py-2.5 px-3">Recebido</th>
                   <th className="py-2.5 px-3">Status</th>
+                  <th className="py-2.5 px-3 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[rgba(218,241,222,0.04)]">
@@ -338,6 +374,16 @@ export default function MinhaHistoriaPage() {
                         {hp.status}
                       </span>
                     </td>
+                    <td className="py-3 px-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button onClick={() => handleEdit(hp)} className="text-[#8EB69B] hover:text-[#E7ECE8]">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => handleDelete(hp.id)} className="text-red-400 hover:text-red-300">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -348,9 +394,9 @@ export default function MinhaHistoriaPage() {
 
       <Modal
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title="Novo Registro Histórico"
-        subtitle="Cadastre um cliente antigo para compor seu faturamento acumulado."
+        onClose={closeModal}
+        title={editId ? "Editar Registro Histórico" : "Novo Registro Histórico"}
+        subtitle="Cadastre ou edite um cliente para compor seu faturamento acumulado."
         maxWidth="md"
       >
         <div className="space-y-4">
@@ -418,11 +464,11 @@ export default function MinhaHistoriaPage() {
             </div>
           </div>
           <div className="pt-4 border-t border-[var(--evo-border)] flex justify-end gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setIsModalOpen(false)}>
+            <Button variant="secondary" size="sm" onClick={closeModal}>
               Cancelar
             </Button>
             <Button variant="primary" size="sm" onClick={handleAddHistorical}>
-              Adicionar ao Histórico
+              {editId ? 'Salvar Alterações' : 'Adicionar ao Histórico'}
             </Button>
           </div>
         </div>

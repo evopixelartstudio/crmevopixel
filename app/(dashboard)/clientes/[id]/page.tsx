@@ -36,6 +36,7 @@ export default function ClienteDetailPage() {
   }
 
   const projects = crmService.getProjects().filter((p) => p.company_name === client.company_name);
+  const historicalProjects = crmService.getHistoricalProjects().filter((p) => p.company_name === client.company_name);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
@@ -128,6 +129,31 @@ export default function ClienteDetailPage() {
                     <div
                       className="bg-[#8EB69B] h-full rounded-full"
                       style={{ width: `${proj.progress_percentage}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+              {historicalProjects.map((proj) => (
+                <div
+                  key={proj.id}
+                  className="p-4 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.06)] space-y-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-[#E7ECE8] font-heading">
+                      {proj.services_summary || 'Projeto Histórico'}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-[#163832] text-[#8EB69B] font-mono">
+                      {proj.status.replace('_', ' ')}
+                    </span>
+                  </div>
+                  <div className="text-xs text-[#9BA6A0]">
+                    Data: {new Date(proj.project_date).toLocaleDateString('pt-BR')} • Recebido: R$ {proj.amount_received.toLocaleString('pt-BR')}
+                  </div>
+                  {/* Barra de progresso para histórico */}
+                  <div className="w-full bg-[#07100F] h-1.5 rounded-full overflow-hidden">
+                    <div
+                      className="bg-[#8EB69B] h-full rounded-full"
+                      style={{ width: `100%` }}
                     />
                   </div>
                 </div>

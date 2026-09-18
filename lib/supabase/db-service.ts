@@ -423,6 +423,28 @@ export class DatabaseService {
     }
   }
 
+  public async updateHistoricalProject(id: string, data: Partial<HistoricalProject>): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('historical_projects').update(data).eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async deleteHistoricalProject(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('historical_projects').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
   // ============================================================================
   // TAREFAS
   // ============================================================================
