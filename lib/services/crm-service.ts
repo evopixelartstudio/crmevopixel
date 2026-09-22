@@ -156,24 +156,47 @@ class CrmService {
   }
 
   // Dashboard Aggregates — Cálculos Estritamente Dinâmicos
-  public getDashboardOverview() {
-    const historicalReceived = this.historicalProjects.reduce((acc, p) => acc + (p.amount_received || 0), 0);
-    const activeReceived = this.transactions
+  public getDashboardOverview(period: 'hoje' | '7d' | '30d' | '90d' | 'ano' | 'historico' = 'historico') {
+    const isDateInPeriod = (dateStr: string | undefined): boolean => {
+      if (!dateStr || period === 'historico') return true;
+      const d = new Date(dateStr);
+      const now = new Date();
+      if (period === 'hoje') {
+        return d.toDateString() === now.toDateString();
+      } else if (period === '7d') {
+        return d >= new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) && d <= now;
+      } else if (period === '30d') {
+        return d >= new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) && d <= now;
+      } else if (period === '90d') {
+        return d >= new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000) && d <= now;
+      } else if (period === 'ano') {
+        return d.getFullYear() === now.getFullYear();
+      }
+      return true;
+    };
+
+    const filteredHistorical = this.historicalProjects.filter((p) => isDateInPeriod(p.project_date));
+    const filteredTransactions = this.transactions.filter((t) => isDateInPeriod(t.due_date));
+
+    const historicalReceived = filteredHistorical.reduce((acc, p) => acc + (p.amount_received || 0), 0);
+    const activeReceived = filteredTransactions
       .filter((t) => t.status === 'pago')
       .reduce((acc, t) => acc + (t.amount_received || 0), 0);
     const monthlyPaidThisMonth = this.monthlyClients
       .filter((c) => c.status === 'ativo' && c.current_month_status === 'pago')
       .reduce((acc, c) => acc + (c.monthly_value || 0), 0);
-    const totalAccumulated = historicalReceived + activeReceived + monthlyPaidThisMonth;
+    // If period is not historico/ano/30d, maybe monthly shouldn't count? We leave it for now or assume it counts if period includes this month. 
+    // Usually MRR is counted as this month.
+    const totalAccumulated = historicalReceived + activeReceived + (['hoje','7d'].includes(period) ? 0 : monthlyPaidThisMonth);
 
-    const historicalPending = this.historicalProjects.reduce((acc, p) => acc + (p.amount_pending || 0), 0);
-    const activePending = this.transactions
+    const historicalPending = filteredHistorical.reduce((acc, p) => acc + (p.amount_pending || 0), 0);
+    const activePending = filteredTransactions
       .filter((t) => t.status !== 'pago')
       .reduce((acc, t) => acc + (t.amount_pending || 0), 0);
     const monthlyPendingThisMonth = this.monthlyClients
       .filter((c) => c.status === 'ativo' && c.current_month_status !== 'pago')
       .reduce((acc, c) => acc + (c.monthly_value || 0), 0);
-    const totalPending = historicalPending + activePending + monthlyPendingThisMonth;
+    const totalPending = historicalPending + activePending + (['hoje','7d'].includes(period) ? 0 : monthlyPendingThisMonth);
 
     // Receita realizada no mês corrente
     const now = new Date();
@@ -419,6 +442,26 @@ class CrmService {
   public deleteOpportunity(id: string): void {
     this.opportunities = this.opportunities.filter(o => o.id !== id);
     dbService.deleteOpportunity(id);
+    this.notify();
+  }
+
+  // Nichos
+  public getNiches(): Niche[] {
+    return this.niches;
+  }
+
+  public addNiche(nicheData: Omit<Niche, 'id'>): Niche {
+    const newNiche: Niche = {
+      ...nicheData,
+      id: `niche-${Date.now()}`,
+    };
+    this.niches.push(newNiche);
+    this.notify();
+    return newNiche;
+  }
+
+  public deleteNiche(id: string): void {
+    this.niches = this.niches.filter(n => n.id !== id);
     this.notify();
   }
 

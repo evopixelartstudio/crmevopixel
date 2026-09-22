@@ -211,6 +211,7 @@ export interface HistoricalProject {
   id: string;
   client_name: string;
   company_name: string;
+  segment?: string;
   services_summary: string;
   amount_contracted: number;
   amount_received: number;

@@ -35,7 +35,8 @@ export default function MinhaHistoriaPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [hCompany, setHCompany] = useState('');
   const [hClient, setHClient] = useState('');
-  const [hServices, setHServices] = useState('');
+  const [hSegment, setHSegment] = useState('');
+  const [hServices, setHServices] = useState<string[]>([]);
   const [hDate, setHDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [hContracted, setHContracted] = useState('');
   const [hReceived, setHReceived] = useState('');
@@ -50,7 +51,8 @@ export default function MinhaHistoriaPage() {
     const payload = {
       company_name: hCompany,
       client_name: hClient || 'N/A',
-      services_summary: hServices || 'Serviços Gerais',
+      segment: hSegment || 'Geral',
+      services_summary: hServices.length > 0 ? hServices.join(', ') : 'Serviços Gerais',
       project_date: hDate,
       amount_contracted: Number(hContracted),
       amount_received: Number(hReceived),
@@ -73,7 +75,8 @@ export default function MinhaHistoriaPage() {
     setEditId(hp.id);
     setHCompany(hp.company_name);
     setHClient(hp.client_name);
-    setHServices(hp.services_summary);
+    setHSegment(hp.segment || '');
+    setHServices(hp.services_summary ? hp.services_summary.split(', ') : []);
     setHDate(hp.project_date);
     setHContracted(String(hp.amount_contracted));
     setHReceived(String(hp.amount_received));
@@ -93,7 +96,8 @@ export default function MinhaHistoriaPage() {
     setEditId(null);
     setHCompany('');
     setHClient('');
-    setHServices('');
+    setHSegment('');
+    setHServices([]);
     setHContracted('');
     setHReceived('');
   };
@@ -423,14 +427,33 @@ export default function MinhaHistoriaPage() {
             </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Serviços Realizados</label>
-            <input
-              type="text"
-              value={hServices}
-              onChange={(e) => setHServices(e.target.value)}
-              placeholder="Ex: Identidade Visual + Website"
+            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Nicho / Segmento</label>
+            <select
+              value={hSegment}
+              onChange={(e) => setHSegment(e.target.value)}
               className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
-            />
+            >
+              <option value="">Selecione um nicho...</option>
+              {crmService.getNiches().map((n) => (
+                <option key={n.id} value={n.name}>{n.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Serviços Realizados (Segure CTRL para vários)</label>
+            <select
+              multiple
+              value={hServices}
+              onChange={(e) => {
+                const selected = Array.from(e.target.selectedOptions, option => option.value);
+                setHServices(selected);
+              }}
+              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs min-h-[100px]"
+            >
+              {crmService.getServices().map((s) => (
+                <option key={s.id} value={s.name}>{s.name}</option>
+              ))}
+            </select>
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div>

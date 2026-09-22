@@ -32,7 +32,7 @@ export default function DashboardPage() {
   const [selectedPeriod, setSelectedPeriod] = useState<TimePeriod>('30d');
   const metrics = metricsService.getMetrics(selectedPeriod);
 
-  const overview = crmService.getDashboardOverview();
+  const overview = crmService.getDashboardOverview(selectedPeriod);
   const opportunities = crmService.getOpportunities();
   const sequences = crmService.getSequences();
   const prospects = crmService.getProspects();

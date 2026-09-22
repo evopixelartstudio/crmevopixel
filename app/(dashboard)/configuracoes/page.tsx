@@ -39,6 +39,24 @@ export default function ConfiguracoesPage() {
   const [evolutionApiKey, setEvolutionApiKey] = useState('••••••••••••••••••••••••••••••••');
   const [n8nWebhookUrl, setN8nWebhookUrl] = useState('https://n8n.evopixel.com.br/webhook/crm-events');
 
+  // Nichos State
+  const [niches, setNiches] = useState(() => crmService.getNiches());
+  const [newNicheName, setNewNicheName] = useState('');
+
+  const handleAddNiche = () => {
+    if (!newNicheName.trim()) return;
+    crmService.addNiche({ name: newNicheName, description: '', status: 'ativo' });
+    setNiches([...crmService.getNiches()]);
+    setNewNicheName('');
+  };
+
+  const handleDeleteNiche = (id: string) => {
+    if (confirm('Tem certeza que deseja remover este nicho?')) {
+      crmService.deleteNiche(id);
+      setNiches([...crmService.getNiches()]);
+    }
+  };
+
   // Supabase State
   const [supabaseStatus, setSupabaseStatus] = useState<any>(null);
   const [isCheckingSupabase, setIsCheckingSupabase] = useState(false);
@@ -660,6 +678,60 @@ export default function ConfiguracoesPage() {
           </div>
         </Card>
       </div>
+
+      {/* =========================================================================
+          SEÇÃO 4: CONFIGURAÇÕES DE NEGÓCIO (NICHOS E SERVIÇOS)
+          ========================================================================= */}
+      <Card className="p-6 space-y-4 border border-[var(--evo-border)]">
+        <div className="flex items-start justify-between border-b border-[var(--evo-border)] pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-[#10201E] border border-[var(--evo-border)] flex items-center justify-center text-[#8EB69B]">
+              <Layers className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--evo-text)] font-heading">
+                Nichos de Atuação
+              </h3>
+              <span className="text-[11px] text-[var(--evo-muted)]">
+                Gerencie os segmentos/nichos para classificação de clientes e prospecção
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={newNicheName}
+              onChange={(e) => setNewNicheName(e.target.value)}
+              placeholder="Nome do Novo Nicho"
+              className="flex-1 px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none text-xs"
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAddNiche(); }}
+            />
+            <Button variant="primary" size="sm" onClick={handleAddNiche} className="text-xs shrink-0">
+              Adicionar Nicho
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            {niches.map((niche) => (
+              <div key={niche.id} className="flex items-center justify-between p-3 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)]">
+                <span className="text-xs text-[var(--evo-text)] font-medium">{niche.name}</span>
+                <button
+                  onClick={() => handleDeleteNiche(niche.id)}
+                  className="text-red-400 hover:text-red-300 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+            {niches.length === 0 && (
+              <div className="text-xs text-[var(--evo-muted)] text-center py-4">Nenhum nicho cadastrado.</div>
+            )}
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }
