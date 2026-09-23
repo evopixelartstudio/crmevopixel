@@ -124,8 +124,8 @@ export async function POST(request: Request) {
     fs.writeFileSync(envPath, envContent, 'utf8');
 
     // 3. Atualizar variáveis em memória do processo atual
-    process.env.NEXT_PUBLIC_SUPABASE_URL = url;
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = anonKey;
+    process.env['NEXT_PUBLIC_' + 'SUPABASE_URL'] = url;
+    process.env['NEXT_PUBLIC_' + 'SUPABASE_ANON_KEY'] = anonKey;
     if (serviceRoleKey) {
       process.env.SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey;
     }
