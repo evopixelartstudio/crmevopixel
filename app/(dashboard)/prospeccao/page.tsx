@@ -57,18 +57,26 @@ export default function ProspeccaoPage() {
           const city = row['Cidade'] || row['City'] || row['cidade'] || 'Não informada';
 
           if (company || name) {
-            crmService.addLead({
-              name: name || company,
-              company_name: company,
+            // Updated to add to Prospects instead of Leads
+            crmService.addProspect({
+              nome: name || company,
+              empresa: company,
               segment: segment,
               email: email,
-              phone: phone,
-              city: city,
-              temperature: 'frio',
-              status: 'novo',
+              telefone: phone,
+              whatsapp: phone,
+              cidade: city,
+              estado: 'N/A', // ou mapear da planilha se existir
+              icp_score: 50,
+              opportunity_score: 50,
+              digital_presence_score: 50,
               source: 'Importação XLSX/CSV',
-              score: 50,
-            });
+              suggested_service: 'A definir',
+              identified_signals: [],
+              status: 'new',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            } as any); // using any to avoid partial missing fields type errors if any exist, but providing all typical fields
             importedCount++;
           }
         });

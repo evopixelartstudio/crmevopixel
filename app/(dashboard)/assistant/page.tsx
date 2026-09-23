@@ -18,11 +18,14 @@ import {
   Clock,
   ExternalLink,
   Lock,
+  Settings, // Added Settings
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { Modal } from '@/components/ui/Modal'; // Added Modal
 import { crmService } from '@/lib/services/crm-service';
 import { assistantTools, ToolExecutionResult } from '@/lib/services/assistant-tools';
+import { aiProvider, AIProviderConfig, AIProviderType } from '@/lib/ai/ai-provider'; // Added aiProvider
 import { PermissionLevel } from '@/types/database';
 
 interface Message {
@@ -74,13 +77,11 @@ const INITIAL_CONVERSATION: Message[] = [
 ];
 
 const SUGGESTED_QUERIES = [
+  'Filtre os prospects recém-importados e sugira o serviço ideal para eles.',
+  'Classifique os leads por probabilidade de fechamento.',
   'Como está nossa taxa de conversão?',
-  'Quanto temos para receber?',
   'Quais leads precisam de atenção?',
   'O que você sugere para prospectarmos hoje?',
-  'Cliente João pagou R$ 2.000.',
-  'Crie uma tarefa para falar com Carlos amanhã.',
-  'Exclua o cliente João.',
 ];
 
 export default function AssistantPage() {
@@ -88,6 +89,14 @@ export default function AssistantPage() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // IA Config State
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [aiConfig, setAiConfig] = useState<AIProviderConfig | null>(null);
+  
+  useEffect(() => {
+    setAiConfig(aiProvider.getConfig());
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -103,7 +112,6 @@ export default function AssistantPage() {
 
     setInput('');
 
-    // Adiciona mensagem do usuário
     const userMsgId = `usr-${Date.now()}`;
     const userMsg: Message = {
       id: userMsgId,
@@ -116,31 +124,58 @@ export default function AssistantPage() {
     setIsLoading(true);
 
     try {
-      // 1. Interpretar intenção
-      const parsed = assistantTools.parseIntent(query);
+      const cfg = aiProvider.getConfig();
+      // Se tiver uma API configurada e ativa (gemini ou claude) com chave, usa a API generativa
+      if ((cfg.activeProvider === 'gemini' && cfg.gemini.apiKey) || 
+          (cfg.activeProvider === 'claude' && cfg.claude.apiKey)) {
+          
+          // Prepara contexto com dados de prospects e leads
+          const contextData = {
+            prospects: crmService.getProspects().slice(0, 50), // limits to 50 for token constraints
+            leads: crmService.getLeads().slice(0, 50)
+          };
+          
+          const aiResponse = await aiProvider.generateCompletion(query, contextData);
+          
+          const assistantMsg: Message = {
+            id: `ast-${Date.now()}`,
+            sender: 'assistant',
+            text: aiResponse.text,
+            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            result: {
+              tool: 'ai_generation',
+              permissionLevel: 'READ',
+              success: true,
+              message: `Resposta gerada via IA (${aiResponse.provider.toUpperCase()} - ${aiResponse.model}). Contexto: ${contextData.prospects.length} Prospects, ${contextData.leads.length} Leads.`,
+              source: ['Evo Assistant AI API', 'CRM Context'],
+            }
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+      } else {
+        // Fallback pro mock de ferramentas se nǜo houver API conectada
+        const parsed = assistantTools.parseIntent(query);
+        const result = await assistantTools.executeTool(
+          parsed.toolName,
+          parsed.params,
+          'session-active',
+          query
+        );
 
-      // 2. Executar ferramenta via pipeline com auditoria
-      const result = await assistantTools.executeTool(
-        parsed.toolName,
-        parsed.params,
-        'session-active',
-        query
-      );
+        const assistantMsg: Message = {
+          id: `ast-${Date.now()}`,
+          sender: 'assistant',
+          text: result.requiresConfirmation
+            ? result.confirmationMessage || result.message
+            : result.message,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          result,
+          pendingConfirmation: result.requiresConfirmation
+            ? { toolName: parsed.toolName, params: parsed.params }
+            : undefined,
+        };
 
-      const assistantMsg: Message = {
-        id: `ast-${Date.now()}`,
-        sender: 'assistant',
-        text: result.requiresConfirmation
-          ? result.confirmationMessage || result.message
-          : result.message,
-        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        result,
-        pendingConfirmation: result.requiresConfirmation
-          ? { toolName: parsed.toolName, params: parsed.params }
-          : undefined,
-      };
-
-      setMessages((prev) => [...prev, assistantMsg]);
+        setMessages((prev) => [...prev, assistantMsg]);
+      }
     } catch {
       const errorMsg: Message = {
         id: `ast-err-${Date.now()}`,
@@ -173,6 +208,8 @@ export default function AssistantPage() {
           return m;
         })
       );
+    } catch {
+      // Ignorar
     } finally {
       setIsLoading(false);
     }
@@ -185,7 +222,7 @@ export default function AssistantPage() {
           return {
             ...m,
             pendingConfirmation: undefined,
-            text: 'Ação cancelada pelo usuário. Nenhuma alteração foi efetuada no banco de dados.',
+            text: 'Operação cancelada com segurança. Nenhuma modificação foi feita no sistema.',
           };
         }
         return m;
@@ -207,13 +244,22 @@ export default function AssistantPage() {
     );
   };
 
+  const saveAiSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (aiConfig) {
+      aiProvider.saveConfig(aiConfig);
+      setIsSettingsOpen(false);
+    }
+  };
+
   return (
-    <div className="h-[calc(100vh-8rem)] flex flex-col bg-[#050706] border border-[rgba(218,241,222,0.08)] rounded-2xl overflow-hidden animate-in fade-in duration-300 shadow-xl">
-      {/* 1. Header Editorial do Assistant */}
-      <div className="h-16 px-6 bg-[#07100F] border-b border-[rgba(218,241,222,0.08)] flex items-center justify-between shrink-0">
+    <div className="h-[calc(100vh-140px)] flex flex-col bg-[#07100F] border border-[rgba(218,241,222,0.06)] rounded-xl overflow-hidden animate-in fade-in duration-200">
+      
+      {/* 1. Cabeçalho do Chat */}
+      <div className="flex items-center justify-between p-4 border-b border-[rgba(218,241,222,0.06)] bg-[#0C1A19] shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.14)] flex items-center justify-center text-[#F1F9A1] shadow-inner">
-            <Bot className="w-4 h-4 text-[#F1F9A1]" />
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#8EB69B] to-[#4A6455] flex items-center justify-center shadow-lg shadow-[#8EB69B]/10">
+            <Bot className="w-5 h-5 text-[#07100F]" />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -230,27 +276,32 @@ export default function AssistantPage() {
             </p>
           </div>
         </div>
-
         <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2 text-xs font-mono text-[#65706A] bg-[#10201E] px-3 py-1.5 rounded-lg border border-[rgba(218,241,222,0.06)]">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#8EB69B]" />
-            <span>Permissões: READ • WRITE • RESTRICTED</span>
+          <div className="flex items-center gap-2 text-[10px] font-mono text-[#65706A] px-3 py-1.5 rounded-lg bg-[#07100F] border border-[rgba(218,241,222,0.05)]">
+            <ShieldCheck className="w-3 h-3 text-[#8EB69B]" />
+            <span>Permissões: READ / WRITE / RESTRICTED</span>
           </div>
+          <Button variant="secondary" size="sm" className="gap-2 text-xs" onClick={() => setIsSettingsOpen(true)}>
+            <Settings className="w-3.5 h-3.5" />
+            Conectar IA
+          </Button>
           <Link href="/intelligence">
-            <Button variant="ghost" size="sm" className="text-xs text-[#8EB69B] hover:text-[#F1F9A1] gap-1">
-              <span>Ver Evo Intelligence</span>
+            <Button variant="outline" size="sm" className="gap-2 text-xs border-[rgba(218,241,222,0.12)]">
+              Ver Evo Intelligence
               <ArrowRight className="w-3.5 h-3.5" />
             </Button>
           </Link>
         </div>
       </div>
 
-      {/* 2. Área Central de Mensagens */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      {/* 2. Área de Mensagens (Histórico) */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-[rgba(218,241,222,0.06)] scrollbar-track-transparent">
         {messages.map((msg) => (
           <div
             key={msg.id}
-            className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}
+            className={`flex flex-col space-y-2 ${
+              msg.sender === 'user' ? 'items-end' : 'items-start'
+            }`}
           >
             <div className="flex items-center gap-2 mb-1.5 px-1">
               <span className="text-[11px] font-mono text-[#65706A]">
@@ -267,19 +318,17 @@ export default function AssistantPage() {
                 {msg.text}
               </div>
             ) : (
-              /* Bloco Editorial do Assistant */
-              <div className="max-w-2xl w-full bg-[#0C1A19] border border-[rgba(218,241,222,0.09)] rounded-2xl rounded-tl-sm p-5 space-y-4 shadow-sm">
-                <div className="text-sm text-[#E7ECE8] leading-relaxed">
-                  {msg.text}
-                </div>
+              /* Balão do Assistente (IA) */
+              <div className="max-w-2xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] text-sm p-5 rounded-2xl rounded-tl-sm shadow-md font-sans space-y-4">
+                <div className="leading-relaxed whitespace-pre-wrap">{msg.text}</div>
 
-                {/* Bloco de Dados Estruturados (se houver) */}
-                {msg.result && msg.result.data ? (
-                  <div className="p-4 rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.06)] space-y-2">
-                    <div className="flex items-center justify-between text-xs border-b border-[rgba(218,241,222,0.06)] pb-2 mb-2">
-                      <div className="flex items-center gap-1.5 text-[11px] font-mono text-[#8EB69B]">
+                {/* Bloco de Resultado de Ferramenta (se houver) */}
+                {msg.result && !msg.pendingConfirmation ? (
+                  <div className="p-3 rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.05)] space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-[10px] font-mono text-[#8EB69B] uppercase tracking-wider">
                         <Database className="w-3.5 h-3.5" />
-                        <span>DADOS CONSULTADOS</span>
+                        Dados Consultados
                       </div>
                       <Badge variant="accent" className="text-[9px] py-0 px-1.5 font-mono">
                         {msg.result.permissionLevel}
@@ -391,7 +440,7 @@ export default function AssistantPage() {
             <div className="bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] rounded-2xl rounded-tl-sm p-4 flex items-center gap-3">
               <div className="w-2 h-2 rounded-full bg-[#F1F9A1] animate-ping" />
               <span className="text-xs text-[#9BA6A0] font-mono">
-                Consultando dados e validando permissões operacionais...
+                Consultando dados, conectando IA e validando permissões...
               </span>
             </div>
           </div>
@@ -428,7 +477,7 @@ export default function AssistantPage() {
           <Sparkles className="w-4 h-4 text-[#8EB69B] shrink-0" />
           <input
             type="text"
-            placeholder="Converse com o CRM... Ex: 'Como está nossa conversão?', 'João pagou R$ 2.000', 'Quais leads precisam de atenção?'"
+            placeholder="Converse com o CRM... Ex: 'Filtrar melhores leads', 'Classifique nossos prospects', 'Sugira ações'"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={isLoading}
@@ -446,10 +495,73 @@ export default function AssistantPage() {
           </Button>
         </form>
         <div className="flex items-center justify-between text-[10px] font-mono text-[#65706A] mt-2 px-1">
-          <span>O Evo Assistant consulta apenas métricas estruturadas e registra toda ação em ai_action_logs.</span>
+          <span>O Evo Assistant analisa os dados de Prospects e Leads se a API de IA estiver configurada.</span>
           <span>Atalho global: Ctrl + K</span>
         </div>
       </div>
+      
+      {/* Modal Configuração API */}
+      <Modal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)}>
+        <div className="p-6">
+          <h2 className="text-lg font-heading text-[#E7ECE8] mb-4">Conectar API de IA</h2>
+          {aiConfig && (
+            <form onSubmit={saveAiSettings} className="space-y-4">
+              <div>
+                <label className="block text-xs font-mono text-[#9BA6A0] mb-1">Provedor Ativo</label>
+                <select
+                  value={aiConfig.activeProvider}
+                  onChange={(e) => setAiConfig({...aiConfig, activeProvider: e.target.value as AIProviderType})}
+                  className="w-full bg-[#07100F] border border-[rgba(218,241,222,0.12)] rounded-lg px-3 py-2 text-sm text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+                >
+                  <option value="gemini">Google Gemini</option>
+                  <option value="claude">Anthropic Claude</option>
+                  <option value="simulation">Apenas Simulação (Mock)</option>
+                </select>
+              </div>
+              
+              {aiConfig.activeProvider === 'gemini' && (
+                <div>
+                  <label className="block text-xs font-mono text-[#9BA6A0] mb-1">Gemini API Key</label>
+                  <input
+                    type="password"
+                    value={aiConfig.gemini.apiKey}
+                    onChange={(e) => setAiConfig({
+                      ...aiConfig, 
+                      gemini: {...aiConfig.gemini, apiKey: e.target.value}
+                    })}
+                    placeholder="AIzaSy..."
+                    className="w-full bg-[#07100F] border border-[rgba(218,241,222,0.12)] rounded-lg px-3 py-2 text-sm text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+                  />
+                  <p className="text-[10px] text-[#65706A] mt-1">Sua chave é armazenada apenas localmente no seu navegador.</p>
+                </div>
+              )}
+              
+              {aiConfig.activeProvider === 'claude' && (
+                <div>
+                  <label className="block text-xs font-mono text-[#9BA6A0] mb-1">Claude API Key</label>
+                  <input
+                    type="password"
+                    value={aiConfig.claude.apiKey}
+                    onChange={(e) => setAiConfig({
+                      ...aiConfig, 
+                      claude: {...aiConfig.claude, apiKey: e.target.value}
+                    })}
+                    placeholder="sk-ant-..."
+                    className="w-full bg-[#07100F] border border-[rgba(218,241,222,0.12)] rounded-lg px-3 py-2 text-sm text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+                  />
+                  <p className="text-[10px] text-[#65706A] mt-1">Sua chave é armazenada apenas localmente no seu navegador.</p>
+                </div>
+              )}
+              
+              <div className="flex justify-end gap-2 pt-4 border-t border-[rgba(218,241,222,0.06)]">
+                <Button type="button" variant="ghost" onClick={() => setIsSettingsOpen(false)}>Cancelar</Button>
+                <Button type="submit" variant="primary">Salvar Configurações</Button>
+              </div>
+            </form>
+          )}
+        </div>
+      </Modal>
+
     </div>
   );
 }
