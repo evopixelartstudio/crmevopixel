@@ -413,7 +413,9 @@ export default function ConfiguracoesPage() {
               <label className="block text-[11px] text-[var(--evo-muted)] mb-1 font-medium">
                 Modelo do Gemini
               </label>
-              <select
+              <input
+                type="text"
+                list="gemini-models"
                 value={aiConfig.gemini.model}
                 onChange={(e) =>
                   setAiConfig({
@@ -421,15 +423,17 @@ export default function ConfiguracoesPage() {
                     gemini: { ...aiConfig.gemini, model: e.target.value },
                   })
                 }
+                placeholder="Ex: gemini-3.6-flash"
                 className="w-full px-3 py-2 rounded-xl bg-[var(--evo-card)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none text-xs"
-              >
-                <option value="gemini-1.5-flash">gemini-1.5-flash (Padrão)</option>
-                <option value="gemini-1.5-flash-latest">gemini-1.5-flash-latest (Última Versão Flash)</option>
-                <option value="gemini-1.5-pro">gemini-1.5-pro (Raciocínio Profundo)</option>
-                <option value="gemini-1.5-pro-latest">gemini-1.5-pro-latest (Última Versão Pro)</option>
-                <option value="gemini-2.0-flash">gemini-2.0-flash (Nova Geração)</option>
-                <option value="gemini-1.0-pro">gemini-1.0-pro (Legado / Mais Estável)</option>
-              </select>
+              />
+              <datalist id="gemini-models">
+                <option value="gemini-3.6-flash">gemini-3.6-flash (Recomendado)</option>
+                <option value="gemini-3.8-flash">gemini-3.8-flash (Último)</option>
+                <option value="gemini-flash-latest">gemini-flash-latest (Automático)</option>
+                <option value="gemini-2.5-flash">gemini-2.5-flash (Estável)</option>
+                <option value="gemini-1.5-flash">gemini-1.5-flash (Legado)</option>
+                <option value="gemini-1.0-pro">gemini-1.0-pro (Legado Antigo)</option>
+              </datalist>
             </div>
 
             <div className="pt-2 flex items-center justify-between">
@@ -516,7 +520,9 @@ export default function ConfiguracoesPage() {
               <label className="block text-[11px] text-[var(--evo-muted)] mb-1 font-medium">
                 Modelo do Claude
               </label>
-              <select
+              <input
+                type="text"
+                list="claude-models"
                 value={aiConfig.claude.model}
                 onChange={(e) =>
                   setAiConfig((prev) => ({
@@ -524,12 +530,14 @@ export default function ConfiguracoesPage() {
                     claude: { ...prev.claude, model: e.target.value },
                   }))
                 }
+                placeholder="Ex: claude-3-7-sonnet-20250219"
                 className="w-full px-3 py-2 rounded-xl bg-[var(--evo-card)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none text-xs"
-              >
+              />
+              <datalist id="claude-models">
                 <option value="claude-3-7-sonnet-20250219">claude-3-7-sonnet-20250219 (Estado da Arte)</option>
                 <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet-20241022 (Equilibrado)</option>
                 <option value="claude-3-5-haiku-20241022">claude-3-5-haiku-20241022 (Ultrarrápido)</option>
-              </select>
+              </datalist>
             </div>
 
             <div className="pt-2 flex items-center justify-between">
