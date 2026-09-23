@@ -416,15 +416,19 @@ export default function ConfiguracoesPage() {
               <select
                 value={aiConfig.gemini.model}
                 onChange={(e) =>
-                  setAiConfig((prev) => ({
-                    ...prev,
-                    gemini: { ...prev.gemini, model: e.target.value },
-                  }))
+                  setAiConfig({
+                    ...aiConfig,
+                    gemini: { ...aiConfig.gemini, model: e.target.value },
+                  })
                 }
                 className="w-full px-3 py-2 rounded-xl bg-[var(--evo-card)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none text-xs"
               >
-                <option value="gemini-1.5-flash">gemini-1.5-flash (Mais Rápido & Recomendado)</option>
+                <option value="gemini-1.5-flash">gemini-1.5-flash (Padrão)</option>
+                <option value="gemini-1.5-flash-latest">gemini-1.5-flash-latest (Última Versão Flash)</option>
                 <option value="gemini-1.5-pro">gemini-1.5-pro (Raciocínio Profundo)</option>
+                <option value="gemini-1.5-pro-latest">gemini-1.5-pro-latest (Última Versão Pro)</option>
+                <option value="gemini-2.0-flash">gemini-2.0-flash (Nova Geração)</option>
+                <option value="gemini-1.0-pro">gemini-1.0-pro (Legado / Mais Estável)</option>
               </select>
             </div>
 

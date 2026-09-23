@@ -100,9 +100,31 @@ class AIProviderService {
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
+        let extraInfo = '';
+        
+        // Se for erro de NotFound, tentamos buscar a lista de modelos permitidos
+        if (res.status === 404 || errData.error?.message?.includes('not found')) {
+          try {
+            const modelsRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+            if (modelsRes.ok) {
+              const modelsData = await modelsRes.json();
+              const availableModels = modelsData.models
+                ?.filter((m: any) => m.name.includes('gemini') && m.supportedGenerationMethods?.includes('generateContent'))
+                .map((m: any) => m.name.replace('models/', ''))
+                .join(', ');
+              
+              if (availableModels) {
+                extraInfo = `\n\nModelos suportados por essa chave: ${availableModels}. Escolha um desses na lista.`;
+              }
+            }
+          } catch (e) {
+            // ignora erro silencioso
+          }
+        }
+
         return {
           success: false,
-          message: `Erro da API Gemini (${res.status}): ${errData.error?.message || 'Chave inválida ou modelo inacessível.'}`,
+          message: `Erro da API Gemini (${res.status}): ${errData.error?.message || 'Chave inválida ou modelo inacessível.'}${extraInfo}`,
         };
       }
 
