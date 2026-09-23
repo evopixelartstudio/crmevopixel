@@ -35,6 +35,7 @@ export default function ProspectsPage() {
   // Apify + AI Capture State
   const [isApifyModalOpen, setIsApifyModalOpen] = useState(false);
   const [apifyKeyword, setApifyKeyword] = useState('');
+  const [apifyToken, setApifyToken] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractionLog, setExtractionLog] = useState('');
 
@@ -78,38 +79,72 @@ export default function ProspectsPage() {
   const handleApifyCapture = async () => {
     if (!apifyKeyword) return;
     setIsExtracting(true);
-    setExtractionLog('Conectando à API do Apify (Simulação)...');
+    setExtractionLog('Iniciando captação...');
 
     try {
-      // 1. Simular Extração do Apify
-      await new Promise(r => setTimeout(r, 1500));
-      setExtractionLog('Extraindo dados de contato (Nome, Telefone, Email)...');
-      await new Promise(r => setTimeout(r, 1500));
-      
-      const mockExtractedLeads = [
-        {
-          nome: 'Dr. Roberto',
-          empresa: `${apifyKeyword} - Matriz`,
-          telefone: '(11) 9' + Math.floor(10000000 + Math.random() * 90000000),
-          email: 'contato@matriz.com.br',
-          cidade: 'São Paulo',
-          segment: apifyKeyword
-        },
-        {
-          nome: 'Clínica/Escritório Associado',
-          empresa: `${apifyKeyword} - Filial`,
-          telefone: '(21) 9' + Math.floor(10000000 + Math.random() * 90000000),
-          email: '',
-          cidade: 'Rio de Janeiro',
-          segment: apifyKeyword
-        }
-      ];
+      let mockExtractedLeads: any[] = [];
 
-      setExtractionLog('Dados extraídos. Enviando para IA analisar e classificar...');
+      if (apifyToken) {
+        setExtractionLog('Conectando à API Real do Apify (Google Maps Scraper)... Isso pode levar até 1 minuto.');
+        const res = await fetch(`https://api.apify.com/v2/acts/apify~google-maps-scraper/run-sync-get-dataset-items?token=${apifyToken}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            searchStringsArray: [apifyKeyword],
+            maxCrawledPlacesPerSearch: 3, // limitando para ser rápido
+            language: "pt",
+            countryCode: "br"
+          })
+        });
+
+        if (!res.ok) {
+          throw new Error('Falha na API do Apify. Verifique o Token.');
+        }
+
+        const data = await res.json();
+        
+        mockExtractedLeads = data.map((item: any) => ({
+          nome: item.title || 'Empresa Local',
+          empresa: item.title || `${apifyKeyword} - Encontrado`,
+          telefone: item.phone || item.phoneUnformatted || '',
+          email: item.email || item.emails?.[0] || '',
+          cidade: item.city || item.addressParsed?.city || 'Desconhecida',
+          segment: item.categories?.[0] || apifyKeyword,
+          site: item.website || ''
+        }));
+      } else {
+        setExtractionLog('Nenhum Token Apify fornecido. Usando Simulação Automática...');
+        await new Promise(r => setTimeout(r, 1500));
+        setExtractionLog('Extraindo dados de contato (Nome, Telefone, Email)...');
+        await new Promise(r => setTimeout(r, 1500));
+        
+        mockExtractedLeads = [
+          {
+            nome: 'Dr. Roberto',
+            empresa: `${apifyKeyword} - Matriz`,
+            telefone: '(11) 9' + Math.floor(10000000 + Math.random() * 90000000),
+            email: 'contato@matriz.com.br',
+            cidade: 'São Paulo',
+            segment: apifyKeyword,
+            site: ''
+          },
+          {
+            nome: 'Clínica/Escritório Associado',
+            empresa: `${apifyKeyword} - Filial`,
+            telefone: '(21) 9' + Math.floor(10000000 + Math.random() * 90000000),
+            email: '',
+            cidade: 'Rio de Janeiro',
+            segment: apifyKeyword,
+            site: ''
+          }
+        ];
+      }
+
+      setExtractionLog(`Foram extraídos ${mockExtractedLeads.length} contatos. Enviando para IA analisar e classificar...`);
 
       // 2. Classificação com IA (Gemini/Claude)
       const aiResponse = await aiProvider.generateCompletion(
-        'Analise estes leads extraídos do Apify e classifique se são Quente (Prioritário), Morno (Analisado) ou Frio (Novo) com base nos dados disponíveis. Retorne apenas "Quente", "Morno" ou "Frio" e um breve motivo.',
+        'Analise estes leads extraídos do Apify e classifique se são Quente (Prioritário), Morno (Analisado) ou Frio (Novo) com base nos dados disponíveis (ex: ter telefone/email/site aumenta a chance). Retorne apenas "Quente", "Morno" ou "Frio" e um breve motivo.',
         { leads: mockExtractedLeads }
       );
 
@@ -137,13 +172,14 @@ export default function ProspectsPage() {
           email: lead.email,
           telefone: lead.telefone,
           whatsapp: lead.telefone,
+          site: lead.site,
           cidade: lead.cidade,
           estado: 'N/A',
           icp_score: icpScore,
           opportunity_score: oppScore,
           digital_presence_score: 50,
-          source: 'Apify Crawler',
-          suggested_service: 'Automação IA',
+          source: apifyToken ? 'Apify Maps Scraper' : 'Apify Crawler (Simulado)',
+          suggested_service: 'A definir',
           identified_signals: ['Lead prospectado via Crawler', aiResponse.provider],
           status: status,
           created_at: new Date().toISOString(),
@@ -160,8 +196,8 @@ export default function ProspectsPage() {
         setExtractionLog('');
       }, 3000);
 
-    } catch (error) {
-      setExtractionLog('Erro durante a extração ou classificação IA.');
+    } catch (error: any) {
+      setExtractionLog(`Erro: ${error?.message || 'Falha na extração ou classificação IA.'}`);
       setIsExtracting(false);
     }
   };
@@ -405,6 +441,19 @@ export default function ProspectsPage() {
               placeholder="Ex: Clínicas Odontológicas SP, Advogados, etc."
               className="w-full bg-[#0C1A19] border border-[rgba(218,241,222,0.12)] rounded-lg px-3 py-2 text-sm text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-mono text-[#9BA6A0] mb-1">Apify API Token (Opcional para testar)</label>
+            <input
+              type="password"
+              value={apifyToken}
+              onChange={(e) => setApifyToken(e.target.value)}
+              disabled={isExtracting}
+              placeholder="apify_api_..."
+              className="w-full bg-[#0C1A19] border border-[rgba(218,241,222,0.12)] rounded-lg px-3 py-2 text-sm text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+            />
+            <p className="text-[10px] text-[#65706A] mt-1">Se vazio, usará um mock de extração para demonstração rápida.</p>
           </div>
 
           {extractionLog && (
