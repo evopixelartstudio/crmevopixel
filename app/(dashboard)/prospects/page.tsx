@@ -97,7 +97,7 @@ export default function ProspectsPage() {
       setExtractionLog(`Bairros mapeados! Buscando 10 leads em cada: ${bairros.join(', ')}...`);
 
       if (apifyToken) {
-        const res = await fetch(`https://api.apify.com/v2/acts/apify~google-maps-scraper/run-sync-get-dataset-items?token=${apifyToken}`, {
+        const res = await fetch(`https://api.apify.com/v2/acts/compass~google-maps-extractor/run-sync-get-dataset-items?token=${apifyToken}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -109,7 +109,12 @@ export default function ProspectsPage() {
         });
 
         if (!res.ok) {
-          throw new Error('Falha na API do Apify. Verifique o Token.');
+          const errText = await res.text();
+          let parsedErr = errText;
+          try {
+            parsedErr = JSON.parse(errText).error?.message || errText;
+          } catch(e) {}
+          throw new Error(`Apify (${res.status}): ${parsedErr}`);
         }
 
         const data = await res.json();
