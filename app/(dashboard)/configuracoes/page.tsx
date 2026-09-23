@@ -29,6 +29,7 @@ import {
   Save,
   Globe,
   Zap,
+  Trash2,
 } from 'lucide-react';
 import { aiProvider, AIProviderConfig } from '@/lib/ai/ai-provider';
 import { updateClientConfig } from '@/lib/supabase/client';
