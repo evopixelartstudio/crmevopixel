@@ -17,17 +17,26 @@ import {
   Building2,
   ChevronRight,
   TrendingUp,
+  DownloadCloud,
 } from 'lucide-react';
 import { crmService } from '@/lib/services/crm-service';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Prospect, ProspectStatus } from '@/types/database';
+import { Modal } from '@/components/ui/Modal';
+import { aiProvider } from '@/lib/ai/ai-provider';
 
 export default function ProspectsPage() {
   const [prospects, setProspects] = useState<Prospect[]>(crmService.getProspects());
   const [search, setSearch] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [convertedToast, setConvertedToast] = useState<string | null>(null);
+
+  // Apify + AI Capture State
+  const [isApifyModalOpen, setIsApifyModalOpen] = useState(false);
+  const [apifyKeyword, setApifyKeyword] = useState('');
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractionLog, setExtractionLog] = useState('');
 
   const filteredProspects = prospects.filter((p) => {
     const matchesSearch =
@@ -66,6 +75,97 @@ export default function ProspectsPage() {
     }
   };
 
+  const handleApifyCapture = async () => {
+    if (!apifyKeyword) return;
+    setIsExtracting(true);
+    setExtractionLog('Conectando à API do Apify (Simulação)...');
+
+    try {
+      // 1. Simular Extração do Apify
+      await new Promise(r => setTimeout(r, 1500));
+      setExtractionLog('Extraindo dados de contato (Nome, Telefone, Email)...');
+      await new Promise(r => setTimeout(r, 1500));
+      
+      const mockExtractedLeads = [
+        {
+          nome: 'Dr. Roberto',
+          empresa: `${apifyKeyword} - Matriz`,
+          telefone: '(11) 9' + Math.floor(10000000 + Math.random() * 90000000),
+          email: 'contato@matriz.com.br',
+          cidade: 'São Paulo',
+          segment: apifyKeyword
+        },
+        {
+          nome: 'Clínica/Escritório Associado',
+          empresa: `${apifyKeyword} - Filial`,
+          telefone: '(21) 9' + Math.floor(10000000 + Math.random() * 90000000),
+          email: '',
+          cidade: 'Rio de Janeiro',
+          segment: apifyKeyword
+        }
+      ];
+
+      setExtractionLog('Dados extraídos. Enviando para IA analisar e classificar...');
+
+      // 2. Classificação com IA (Gemini/Claude)
+      const aiResponse = await aiProvider.generateCompletion(
+        'Analise estes leads extraídos do Apify e classifique se são Quente (Prioritário), Morno (Analisado) ou Frio (Novo) com base nos dados disponíveis. Retorne apenas "Quente", "Morno" ou "Frio" e um breve motivo.',
+        { leads: mockExtractedLeads }
+      );
+
+      // Interpretar a resposta da IA para definir o status do CRM e Score
+      mockExtractedLeads.forEach((lead) => {
+        let status: ProspectStatus = 'new'; // Frio
+        let icpScore = 30;
+        let oppScore = 20;
+
+        const aiText = aiResponse.text.toLowerCase();
+        if (aiText.includes('quente')) {
+          status = 'priority';
+          icpScore = 90;
+          oppScore = 85;
+        } else if (aiText.includes('morno')) {
+          status = 'analyzed';
+          icpScore = 60;
+          oppScore = 50;
+        }
+
+        crmService.addProspect({
+          nome: lead.nome,
+          empresa: lead.empresa,
+          segment: lead.segment,
+          email: lead.email,
+          telefone: lead.telefone,
+          whatsapp: lead.telefone,
+          cidade: lead.cidade,
+          estado: 'N/A',
+          icp_score: icpScore,
+          opportunity_score: oppScore,
+          digital_presence_score: 50,
+          source: 'Apify Crawler',
+          suggested_service: 'Automação IA',
+          identified_signals: ['Lead prospectado via Crawler', aiResponse.provider],
+          status: status,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        } as any);
+      });
+
+      setProspects([...crmService.getProspects()]);
+      setExtractionLog(`Concluído! ${mockExtractedLeads.length} prospects adicionados e classificados via ${aiResponse.provider.toUpperCase()}.`);
+      setTimeout(() => {
+        setIsExtracting(false);
+        setIsApifyModalOpen(false);
+        setApifyKeyword('');
+        setExtractionLog('');
+      }, 3000);
+
+    } catch (error) {
+      setExtractionLog('Erro durante a extração ou classificação IA.');
+      setIsExtracting(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Toast de Conversão */}
@@ -95,6 +195,15 @@ export default function ProspectsPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          <Button 
+            variant="primary" 
+            size="sm" 
+            className="gap-2 bg-gradient-to-r from-blue-500 to-[#8EB69B] text-[#07100F] border-none"
+            onClick={() => setIsApifyModalOpen(true)}
+          >
+            <DownloadCloud className="w-3.5 h-3.5" />
+            <span>Captar via Apify + IA</span>
+          </Button>
           <Link href="/prospeccao/mensagens">
             <Button variant="secondary" size="sm" className="gap-2">
               <Sparkles className="w-3.5 h-3.5 text-[#8EB69B]" />
@@ -166,7 +275,7 @@ export default function ProspectsPage() {
                   : 'bg-[#07100F] text-[#9BA6A0] border-[rgba(218,241,222,0.06)] hover:text-[#E7ECE8]'
               }`}
             >
-              {st === 'all' ? 'Todos' : st === 'converted_to_lead' ? 'Convertidos' : st}
+              {st === 'all' ? 'Todos' : st === 'converted_to_lead' ? 'Convertidos' : st === 'priority' ? 'Quentes' : st === 'analyzed' ? 'Mornos' : 'Frios'}
             </button>
           ))}
         </div>
@@ -190,7 +299,7 @@ export default function ProspectsPage() {
                     {getStatusBadge(prospect.status)}
                   </div>
                   <div className="text-xs text-[#8EB69B] mt-0.5">
-                    {prospect.nome} • {prospect.cidade}/{prospect.estado}
+                    {prospect.nome} — {prospect.cidade}/{prospect.estado}
                   </div>
                 </div>
 
@@ -213,7 +322,7 @@ export default function ProspectsPage() {
                 <div className="space-y-1">
                   {prospect.identified_signals.map((sig, idx) => (
                     <div key={idx} className="flex items-start gap-1.5 text-[11px] text-[#9BA6A0]">
-                      <span className="text-[#8EB69B] mt-0.5">•</span>
+                      <span className="text-[#8EB69B] mt-0.5">—</span>
                       <span>{sig}</span>
                     </div>
                   ))}
@@ -276,6 +385,67 @@ export default function ProspectsPage() {
           </div>
         ))}
       </div>
+
+      {/* Modal Apify Capture */}
+      <Modal 
+        isOpen={isApifyModalOpen} 
+        onClose={() => !isExtracting && setIsApifyModalOpen(false)}
+        title="Captação via Apify + IA"
+        subtitle="Extraia potenciais clientes da web e classifique-os instantaneamente usando Inteligência Artificial."
+        maxWidth="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-mono text-[#9BA6A0] mb-1">Palavra-chave ou Ramo</label>
+            <input
+              type="text"
+              value={apifyKeyword}
+              onChange={(e) => setApifyKeyword(e.target.value)}
+              disabled={isExtracting}
+              placeholder="Ex: Clínicas Odontológicas SP, Advogados, etc."
+              className="w-full bg-[#0C1A19] border border-[rgba(218,241,222,0.12)] rounded-lg px-3 py-2 text-sm text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+            />
+          </div>
+
+          {extractionLog && (
+            <div className="bg-[#10201E] border border-[rgba(218,241,222,0.08)] rounded-xl p-3 text-xs text-[#8EB69B] font-mono">
+              <span className="inline-block w-2 h-2 rounded-full bg-[#F1F9A1] animate-pulse mr-2"></span>
+              {extractionLog}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-[rgba(218,241,222,0.06)]">
+            <Button 
+              type="button" 
+              variant="ghost" 
+              onClick={() => setIsApifyModalOpen(false)}
+              disabled={isExtracting}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              type="button" 
+              variant="primary" 
+              onClick={handleApifyCapture}
+              disabled={isExtracting || !apifyKeyword}
+              className="gap-2"
+            >
+              {isExtracting ? (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                  <span>Processando...</span>
+                </>
+              ) : (
+                <>
+                  <DownloadCloud className="w-3.5 h-3.5 text-[#07100F]" />
+                  <span>Iniciar Captação</span>
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
     </div>
   );
 }

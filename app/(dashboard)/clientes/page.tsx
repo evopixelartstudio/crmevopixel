@@ -259,13 +259,19 @@ export default function ClientesPage() {
           </div>
           <div>
             <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Segmento / Nicho</label>
-            <input
-              type="text"
+            <select
               value={cSegment}
               onChange={(e) => setCSegment(e.target.value)}
-              placeholder="Ex: Odontologia"
-              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
-            />
+              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs appearance-none"
+            >
+              <option value="" disabled>Selecione um Nicho</option>
+              <option value="Geral">Geral</option>
+              {crmService.getNiches().map((niche) => (
+                <option key={niche.id} value={niche.name}>
+                  {niche.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
