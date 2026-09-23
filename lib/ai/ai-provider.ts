@@ -8,7 +8,7 @@ export interface AIProviderConfig {
   activeProvider: AIProviderType;
   gemini: {
     apiKey: string;
-    model: string; // 'gemini-2.5-flash' | 'gemini-1.5-pro'
+    model: string; // 'gemini-1.5-flash' | 'gemini-1.5-pro'
     temperature: number;
     enabled: boolean;
   };
@@ -30,7 +30,7 @@ export const DEFAULT_AI_CONFIG: AIProviderConfig = {
   activeProvider: 'gemini',
   gemini: {
     apiKey: '',
-    model: 'gemini-2.5-flash',
+    model: 'gemini-1.5-flash',
     temperature: 0.4,
     enabled: false,
   },
@@ -81,7 +81,7 @@ class AIProviderService {
   }
 
   // Testar conexão com Google Gemini
-  public async testGemini(apiKey: string, model: string = 'gemini-2.5-flash'): Promise<{ success: boolean; message: string }> {
+  public async testGemini(apiKey: string, model: string = 'gemini-1.5-flash'): Promise<{ success: boolean; message: string }> {
     if (!apiKey) {
       return { success: false, message: 'API Key do Gemini não fornecida.' };
     }

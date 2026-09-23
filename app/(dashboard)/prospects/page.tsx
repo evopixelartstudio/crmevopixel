@@ -34,7 +34,8 @@ export default function ProspectsPage() {
 
   // Apify + AI Capture State
   const [isApifyModalOpen, setIsApifyModalOpen] = useState(false);
-  const [apifyKeyword, setApifyKeyword] = useState('');
+  const [apifyNiche, setApifyNiche] = useState('');
+  const [apifyCity, setApifyCity] = useState('');
   const [apifyToken, setApifyToken] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractionLog, setExtractionLog] = useState('');
@@ -77,21 +78,31 @@ export default function ProspectsPage() {
   };
 
   const handleApifyCapture = async () => {
-    if (!apifyKeyword) return;
+    if (!apifyNiche || !apifyCity) return;
     setIsExtracting(true);
     setExtractionLog('Iniciando captação...');
 
     try {
       let mockExtractedLeads: any[] = [];
+      
+      // 1. Mapear Bairros com IA
+      setExtractionLog(`Mapeando os 5 principais bairros de ${apifyCity} via IA...`);
+      const bairrosRes = await aiProvider.generateCompletion(
+        `Você é um assistente de inteligência de mercado local. Liste os 5 maiores, mais populosos e principais bairros comerciais da cidade de "${apifyCity}". Retorne APENAS os nomes separados por vírgula, sem nenhum outro texto, ponto final ou numeração. Exemplo: Centro, Jardins, Pinheiros, Itaim Bibi, Moema`,
+        {}
+      );
+      
+      const bairros = bairrosRes.text.split(',').map(b => b.trim()).filter(Boolean).slice(0, 5);
+      const searchStrings = bairros.map(b => `${apifyNiche} em ${b}, ${apifyCity}`);
+      setExtractionLog(`Bairros mapeados! Buscando 10 leads em cada: ${bairros.join(', ')}...`);
 
       if (apifyToken) {
-        setExtractionLog('Conectando à API Real do Apify (Google Maps Scraper)... Isso pode levar até 1 minuto.');
         const res = await fetch(`https://api.apify.com/v2/acts/apify~google-maps-scraper/run-sync-get-dataset-items?token=${apifyToken}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            searchStringsArray: [apifyKeyword],
-            maxCrawledPlacesPerSearch: 3, // limitando para ser rápido
+            searchStringsArray: searchStrings,
+            maxCrawledPlacesPerSearch: 10,
             language: "pt",
             countryCode: "br"
           })
@@ -105,11 +116,11 @@ export default function ProspectsPage() {
         
         mockExtractedLeads = data.map((item: any) => ({
           nome: item.title || 'Empresa Local',
-          empresa: item.title || `${apifyKeyword} - Encontrado`,
+          empresa: item.title || `${apifyNiche} - ${item.city || apifyCity}`,
           telefone: item.phone || item.phoneUnformatted || '',
           email: item.email || item.emails?.[0] || '',
-          cidade: item.city || item.addressParsed?.city || 'Desconhecida',
-          segment: item.categories?.[0] || apifyKeyword,
+          cidade: item.city || item.addressParsed?.city || apifyCity,
+          segment: item.categories?.[0] || apifyNiche,
           site: item.website || ''
         }));
       } else {
@@ -118,26 +129,20 @@ export default function ProspectsPage() {
         setExtractionLog('Extraindo dados de contato (Nome, Telefone, Email)...');
         await new Promise(r => setTimeout(r, 1500));
         
-        mockExtractedLeads = [
-          {
-            nome: 'Dr. Roberto',
-            empresa: `${apifyKeyword} - Matriz`,
-            telefone: '(11) 9' + Math.floor(10000000 + Math.random() * 90000000),
-            email: 'contato@matriz.com.br',
-            cidade: 'São Paulo',
-            segment: apifyKeyword,
-            site: ''
-          },
-          {
-            nome: 'Clínica/Escritório Associado',
-            empresa: `${apifyKeyword} - Filial`,
-            telefone: '(21) 9' + Math.floor(10000000 + Math.random() * 90000000),
-            email: '',
-            cidade: 'Rio de Janeiro',
-            segment: apifyKeyword,
-            site: ''
+        // Mocking roughly 50 leads total
+        bairros.forEach((bairro, idx) => {
+          for(let i=0; i<10; i++) {
+            mockExtractedLeads.push({
+              nome: `Resp. ${bairro} ${i+1}`,
+              empresa: `${apifyNiche} - ${bairro}`,
+              telefone: `(${idx+11}) 9` + Math.floor(10000000 + Math.random() * 90000000),
+              email: i % 2 === 0 ? `contato@${bairro.toLowerCase().replace(/\s/g, '')}.com.br` : '',
+              cidade: apifyCity,
+              segment: apifyNiche,
+              site: ''
+            });
           }
-        ];
+        });
       }
 
       setExtractionLog(`Foram extraídos ${mockExtractedLeads.length} contatos. Enviando para IA analisar e classificar...`);
@@ -192,7 +197,8 @@ export default function ProspectsPage() {
       setTimeout(() => {
         setIsExtracting(false);
         setIsApifyModalOpen(false);
-        setApifyKeyword('');
+        setApifyNiche('');
+        setApifyCity('');
         setExtractionLog('');
       }, 3000);
 
@@ -431,16 +437,34 @@ export default function ProspectsPage() {
         maxWidth="md"
       >
         <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-mono text-[#9BA6A0] mb-1">Palavra-chave ou Ramo</label>
-            <input
-              type="text"
-              value={apifyKeyword}
-              onChange={(e) => setApifyKeyword(e.target.value)}
-              disabled={isExtracting}
-              placeholder="Ex: Clínicas Odontológicas SP, Advogados, etc."
-              className="w-full bg-[#0C1A19] border border-[rgba(218,241,222,0.12)] rounded-lg px-3 py-2 text-sm text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-mono text-[#9BA6A0] mb-1">Nicho Alvo</label>
+              <select
+                value={apifyNiche}
+                onChange={(e) => setApifyNiche(e.target.value)}
+                disabled={isExtracting}
+                className="w-full bg-[#0C1A19] border border-[rgba(218,241,222,0.12)] rounded-lg px-3 py-2 text-sm text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B] appearance-none"
+              >
+                <option value="" disabled>Selecione...</option>
+                {crmService.getNiches().map((n) => (
+                  <option key={n.id} value={n.name}>{n.name}</option>
+                ))}
+                <option value="Geral">Geral</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-mono text-[#9BA6A0] mb-1">Cidade</label>
+              <input
+                type="text"
+                value={apifyCity}
+                onChange={(e) => setApifyCity(e.target.value)}
+                disabled={isExtracting}
+                placeholder="Ex: São Paulo, SP"
+                className="w-full bg-[#0C1A19] border border-[rgba(218,241,222,0.12)] rounded-lg px-3 py-2 text-sm text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+              />
+            </div>
           </div>
 
           <div>
@@ -476,7 +500,7 @@ export default function ProspectsPage() {
               type="button" 
               variant="primary" 
               onClick={handleApifyCapture}
-              disabled={isExtracting || !apifyKeyword}
+              disabled={isExtracting || !apifyNiche || !apifyCity}
               className="gap-2"
             >
               {isExtracting ? (

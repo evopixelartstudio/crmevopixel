@@ -423,9 +423,8 @@ export default function ConfiguracoesPage() {
                 }
                 className="w-full px-3 py-2 rounded-xl bg-[var(--evo-card)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none text-xs"
               >
-                <option value="gemini-2.5-flash">gemini-2.5-flash (Mais Rápido & Recomendado)</option>
+                <option value="gemini-1.5-flash">gemini-1.5-flash (Mais Rápido & Recomendado)</option>
                 <option value="gemini-1.5-pro">gemini-1.5-pro (Raciocínio Profundo)</option>
-                <option value="gemini-1.5-flash">gemini-1.5-flash (Econômico)</option>
               </select>
             </div>
 
