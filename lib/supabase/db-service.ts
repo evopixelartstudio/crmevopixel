@@ -1,0 +1,959 @@
+import { getSupabase, isSupabaseConfigured } from './client';
+import {
+  Lead,
+  Client,
+  Prospect,
+  Opportunity,
+  MonthlyClient,
+  Proposal,
+  Contract,
+  Project,
+  HistoricalProject,
+  TaskItem,
+  FinancialTransaction,
+  Service,
+} from '@/types/database';
+
+function isValidUUID(str?: string | null): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
+function sanitizeLeadForSupabase(lead: Partial<Lead>): any {
+  let notes = lead.notes || '';
+  const metadata: any = {};
+  if (lead.google_business) metadata.google_business = lead.google_business;
+  if (Array.isArray(lead.services) && lead.services.length > 0) metadata.services = lead.services;
+  if (lead.sequence_progress) metadata.sequence_progress = lead.sequence_progress;
+  if (lead.ai_analysis) metadata.ai_analysis = lead.ai_analysis;
+
+  if (Object.keys(metadata).length > 0) {
+    const cleanedNotes = notes.replace(/<!--METADATA:[\s\S]*?-->/, '').trim();
+    notes = cleanedNotes
+      ? `${cleanedNotes}\n<!--METADATA:${JSON.stringify(metadata)}-->`
+      : `<!--METADATA:${JSON.stringify(metadata)}-->`;
+  }
+
+  const payload: any = {};
+  if (lead.id && isValidUUID(lead.id)) payload.id = lead.id;
+  if (lead.name !== undefined) payload.name = lead.name;
+  if (lead.company_name !== undefined) payload.company_name = lead.company_name;
+  if (lead.role !== undefined) payload.role = lead.role || null;
+  if (lead.email !== undefined) payload.email = lead.email || null;
+  if (lead.phone !== undefined) payload.phone = lead.phone || null;
+  if (lead.whatsapp !== undefined) payload.whatsapp = lead.whatsapp || null;
+  if (lead.instagram !== undefined) payload.instagram = lead.instagram || null;
+  if (lead.website !== undefined) payload.website = lead.website || null;
+  if (lead.city !== undefined) payload.city = lead.city || null;
+  if (lead.state !== undefined) payload.state = lead.state || null;
+  if (lead.segment !== undefined) payload.segment = lead.segment || null;
+  if (lead.score !== undefined) payload.score = lead.score;
+  if (lead.temperature !== undefined) payload.temperature = lead.temperature;
+  if (lead.status !== undefined) payload.status = lead.status;
+  if (lead.next_action !== undefined) payload.next_action = lead.next_action || null;
+  if (lead.next_action_at !== undefined) payload.next_action_at = lead.next_action_at || null;
+  if (lead.last_contact_at !== undefined) payload.last_contact_at = lead.last_contact_at || null;
+  if (lead.company_id && isValidUUID(lead.company_id)) payload.company_id = lead.company_id;
+  if (lead.niche_id && isValidUUID(lead.niche_id)) payload.niche_id = lead.niche_id;
+  if (lead.source_id && isValidUUID(lead.source_id)) payload.source_id = lead.source_id;
+  payload.notes = notes || null;
+  payload.updated_at = new Date().toISOString();
+
+  return payload;
+}
+
+function parseLeadFromSupabase(row: any): Lead {
+  let google_business = row.google_business || '';
+  let services: string[] = Array.isArray(row.services) ? row.services : [];
+  let sequence_progress = row.sequence_progress;
+  let ai_analysis = row.ai_analysis;
+  let notes = row.notes || '';
+
+  if (notes && notes.includes('<!--METADATA:')) {
+    const match = notes.match(/<!--METADATA:([\s\S]*?)-->/);
+    if (match) {
+      try {
+        const parsed = JSON.parse(match[1]);
+        if (parsed.google_business && !google_business) google_business = parsed.google_business;
+        if (Array.isArray(parsed.services) && services.length === 0) services = parsed.services;
+        if (parsed.sequence_progress && !sequence_progress) sequence_progress = parsed.sequence_progress;
+        if (parsed.ai_analysis && !ai_analysis) ai_analysis = parsed.ai_analysis;
+        notes = notes.replace(/<!--METADATA:[\s\S]*?-->/, '').trim();
+      } catch (e) {}
+    }
+  }
+
+  return {
+    ...row,
+    notes,
+    google_business,
+    services,
+    sequence_progress,
+    ai_analysis,
+  } as Lead;
+}
+
+export class DatabaseService {
+  // ============================================================================
+  // CLIENTES
+  // ============================================================================
+  public async getClients(): Promise<Client[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('clients')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error || !data) {
+        console.error('Supabase getClients error:', error);
+        return null;
+      }
+      return data as Client[];
+    } catch (err) {
+      console.error('Supabase getClients exception:', err);
+      return null;
+    }
+  }
+
+  public async insertClient(client: Client): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      
+      // Remover ID mock (ex: 'client-...' ou 'cli-...') para que o Supabase gere o UUID
+      let dataToInsert: any = { ...client };
+      if (dataToInsert.id && (dataToInsert.id.startsWith('client-') || dataToInsert.id.startsWith('cli-'))) {
+        delete dataToInsert.id;
+      }
+
+      let { error } = await supabase.from('clients').upsert([dataToInsert]);
+      if (error && dataToInsert.website_url !== undefined) {
+        const { website_url, ...fallbackData } = dataToInsert;
+        const retry = await supabase.from('clients').upsert([fallbackData]);
+        error = retry.error;
+      }
+      if (error) console.error('Supabase insertClient error:', error);
+      return !error;
+    } catch (err) {
+      console.error('Supabase insertClient exception:', err);
+      return false;
+    }
+  }
+
+  public async updateClient(id: string, data: Partial<Client>): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      
+      // Remover ID mock
+      let dataToUpdate: any = { ...data };
+      if (dataToUpdate.id && (dataToUpdate.id.startsWith('client-') || dataToUpdate.id.startsWith('cli-'))) {
+        delete dataToUpdate.id;
+      }
+
+      let { error } = await supabase.from('clients').update(dataToUpdate).eq('id', id);
+      if (error && dataToUpdate.website_url !== undefined) {
+        const { website_url, ...fallbackData } = dataToUpdate;
+        const retry = await supabase.from('clients').update(fallbackData).eq('id', id);
+        error = retry.error;
+      }
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async deleteClient(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('clients').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // ============================================================================
+  // CLIENTES MENSALISTAS (MRR)
+  // ============================================================================
+  public async getMonthlyClients(): Promise<MonthlyClient[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('monthly_clients')
+        .select('*')
+        .order('billing_day', { ascending: true });
+      if (error || !data) return null;
+      return data as MonthlyClient[];
+    } catch {
+      return null;
+    }
+  }
+
+  public async insertMonthlyClient(client: MonthlyClient): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const dataToInsert: any = { ...client };
+      if (dataToInsert.id && !isValidUUID(dataToInsert.id)) {
+        delete dataToInsert.id;
+      }
+      if (dataToInsert.client_id && !isValidUUID(dataToInsert.client_id)) {
+        delete dataToInsert.client_id;
+      }
+      if (dataToInsert.start_date && dataToInsert.start_date.includes('T')) {
+        dataToInsert.start_date = dataToInsert.start_date.split('T')[0];
+      }
+      const { error } = await supabase.from('monthly_clients').upsert([dataToInsert]);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async updateMonthlyClient(id: string, data: Partial<MonthlyClient>): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const dataToUpdate: any = { ...data };
+      if (dataToUpdate.id && !isValidUUID(dataToUpdate.id)) {
+        delete dataToUpdate.id;
+      }
+      if (dataToUpdate.client_id && !isValidUUID(dataToUpdate.client_id)) {
+        delete dataToUpdate.client_id;
+      }
+      if (dataToUpdate.start_date && dataToUpdate.start_date.includes('T')) {
+        dataToUpdate.start_date = dataToUpdate.start_date.split('T')[0];
+      }
+      const { error } = await supabase.from('monthly_clients').update(dataToUpdate).eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async deleteMonthlyClient(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('monthly_clients').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // ============================================================================
+  // LEADS
+  // ============================================================================
+  public async getLeads(): Promise<Lead[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('leads')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error || !data) {
+        if (error) console.error('Supabase getLeads error:', error);
+        return null;
+      }
+      return data.map(parseLeadFromSupabase);
+    } catch (err) {
+      console.error('Supabase getLeads exception:', err);
+      return null;
+    }
+  }
+
+  public async insertLead(lead: Lead): Promise<Lead | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const payload = sanitizeLeadForSupabase(lead);
+      const { data, error } = await supabase.from('leads').upsert([payload]).select();
+      if (error) {
+        console.error('Supabase insertLead error:', error);
+        return null;
+      }
+      if (data && data.length > 0) {
+        return parseLeadFromSupabase(data[0]);
+      }
+      return null;
+    } catch (err) {
+      console.error('Supabase insertLead exception:', err);
+      return null;
+    }
+  }
+
+  public async updateLead(id: string, data: Partial<Lead>): Promise<boolean> {
+    if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
+    try {
+      const supabase = getSupabase();
+      const payload = sanitizeLeadForSupabase(data);
+      delete payload.id;
+      const { error } = await supabase.from('leads').update(payload).eq('id', id);
+      if (error) console.error('Supabase updateLead error:', error);
+      return !error;
+    } catch (err) {
+      console.error('Supabase updateLead exception:', err);
+      return false;
+    }
+  }
+
+  public async deleteLead(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('leads').delete().eq('id', id);
+      if (error) console.error('Supabase deleteLead error:', error);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteLead exception:', err);
+      return false;
+    }
+  }
+
+  public async deleteLeads(ids: string[]): Promise<boolean> {
+    const validUuids = ids.filter(isValidUUID);
+    if (!isSupabaseConfigured() || validUuids.length === 0) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('leads').delete().in('id', validUuids);
+      if (error) console.error('Supabase deleteLeads error:', error);
+      return !error;
+    } catch (err) {
+      console.error('Supabase deleteLeads exception:', err);
+      return false;
+    }
+  }
+
+  // ============================================================================
+  // PROSPECTOS (PROSPECÇÃO ATIVA IA)
+  // ============================================================================
+  public async getProspects(): Promise<Prospect[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('prospects')
+        .select('*')
+        .order('icp_score', { ascending: false });
+      if (error || !data) return null;
+      return data as Prospect[];
+    } catch {
+      return null;
+    }
+  }
+
+  public async insertProspect(prospect: Prospect): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('prospects').upsert([prospect]);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async updateProspectStatus(id: string, status: Prospect['status']): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from('prospects')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async deleteProspect(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('prospects').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // ============================================================================
+  // OPORTUNIDADES / PIPELINE KANBAN
+  // ============================================================================
+  public async getOpportunities(): Promise<Opportunity[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.from('opportunities').select('*');
+      if (error || !data) return null;
+      return data as Opportunity[];
+    } catch {
+      return null;
+    }
+  }
+
+  public async insertOpportunity(opportunity: Opportunity): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const payload: any = { ...opportunity };
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (payload.id && !uuidRegex.test(payload.id)) {
+        delete payload.id;
+      }
+      const { data, error } = await supabase.from('opportunities').upsert([payload]).select();
+      if (!error && data && data.length > 0 && !opportunity.id) {
+        opportunity.id = data[0].id;
+      }
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async updateOpportunityStage(id: string, stageSlug: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from('opportunities')
+        .update({ stage_slug: stageSlug, updated_at: new Date().toISOString() })
+        .eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async deleteOpportunity(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('opportunities').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // ============================================================================
+  // PROPOSTAS
+  // ============================================================================
+  public async getProposals(): Promise<Proposal[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('proposals')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error || !data) return null;
+      return data as Proposal[];
+    } catch {
+      return null;
+    }
+  }
+
+  public async insertProposal(proposal: Proposal): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('proposals').upsert([proposal]);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async updateProposal(id: string, data: Partial<Proposal>): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('proposals').update(data).eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async deleteProposal(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('proposals').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // ============================================================================
+  // CONTRATOS
+  // ============================================================================
+  public async getContracts(): Promise<Contract[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.from('contracts').select('*');
+      if (error || !data) return null;
+      return data as Contract[];
+    } catch {
+      return null;
+    }
+  }
+
+  public async insertContract(contract: Contract): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('contracts').upsert([contract]);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async updateContract(id: string, data: Partial<Contract>): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('contracts').update(data).eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async deleteContract(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('contracts').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // ============================================================================
+  // PROJETOS & MEU HISTÓRICO
+  // ============================================================================
+  private parseMetadataFromNotes(row: any): any {
+    let notes = row.notes || '';
+    let parsedMeta: any = {};
+    if (notes && notes.includes('<!--METADATA:')) {
+      const match = notes.match(/<!--METADATA:([\s\S]*?)-->/);
+      if (match) {
+        try {
+          parsedMeta = JSON.parse(match[1]);
+          notes = notes.replace(/<!--METADATA:[\s\S]*?-->/, '').trim();
+        } catch {}
+      }
+    }
+    return {
+      ...parsedMeta,
+      ...row,
+      website_url: row.website_url || parsedMeta.website_url || undefined,
+      segment: row.segment || parsedMeta.segment || undefined,
+      notes,
+    };
+  }
+
+  private packMetadataIntoNotes(data: any, extraFields: string[]): any {
+    let notes = (data.notes || '').replace(/<!--METADATA:[\s\S]*?-->/, '').trim();
+    const meta: any = {};
+    for (const field of extraFields) {
+      if (data[field] !== undefined) {
+        meta[field] = data[field];
+      }
+    }
+    if (Object.keys(meta).length > 0) {
+      notes = notes
+        ? `${notes}\n<!--METADATA:${JSON.stringify(meta)}-->`
+        : `<!--METADATA:${JSON.stringify(meta)}-->`;
+    }
+    return { ...data, notes: notes || null };
+  }
+
+  public async getProjects(): Promise<Project[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.from('projects').select('*');
+      if (error || !data) return null;
+      return data.map((row) => this.parseMetadataFromNotes(row)) as Project[];
+    } catch {
+      return null;
+    }
+  }
+
+  public async insertProject(project: Project): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      let dataToInsert: any = this.packMetadataIntoNotes(project, [
+        'website_url',
+        'segment',
+        'client_name',
+        'company_name',
+        'services',
+        'progress_percentage',
+        'amount_contracted',
+        'amount_received',
+      ]);
+      if (dataToInsert.id && (dataToInsert.id.startsWith('proj-') || !isValidUUID(dataToInsert.id))) {
+        delete dataToInsert.id;
+      }
+      let { error } = await supabase.from('projects').upsert([dataToInsert]);
+      if (error && dataToInsert.website_url !== undefined) {
+        const { website_url, segment, amount_contracted, amount_received, ...fallbackData } = dataToInsert;
+        const retry = await supabase.from('projects').upsert([fallbackData]);
+        error = retry.error;
+      }
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async updateProject(id: string, data: Partial<Project>): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      let dataToUpdate: any = this.packMetadataIntoNotes(data, [
+        'website_url',
+        'segment',
+        'client_name',
+        'company_name',
+        'services',
+        'progress_percentage',
+        'amount_contracted',
+        'amount_received',
+      ]);
+      if (dataToUpdate.id && !isValidUUID(dataToUpdate.id)) {
+        delete dataToUpdate.id;
+      }
+      let { error } = await supabase.from('projects').update(dataToUpdate).eq('id', id);
+      if (error && dataToUpdate.website_url !== undefined) {
+        const { website_url, segment, amount_contracted, amount_received, ...fallbackData } = dataToUpdate;
+        const retry = await supabase.from('projects').update(fallbackData).eq('id', id);
+        error = retry.error;
+      }
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async deleteProject(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('projects').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async getHistoricalProjects(): Promise<HistoricalProject[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('historical_projects')
+        .select('*')
+        .order('project_date', { ascending: false });
+      if (error || !data) {
+        console.error('Supabase getHistoricalProjects error:', error);
+        return null;
+      }
+      return data.map((row) => this.parseMetadataFromNotes(row)) as HistoricalProject[];
+    } catch (err) {
+      console.error('Supabase getHistoricalProjects exception:', err);
+      return null;
+    }
+  }
+
+  public async insertHistoricalProject(project: HistoricalProject): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+
+      // Remover ID mock (ex: 'hist-...') para que o Supabase gere o UUID
+      let dataToInsert: any = this.packMetadataIntoNotes(project, ['website_url', 'segment']);
+      if (dataToInsert.id && dataToInsert.id.startsWith('hist-')) {
+        delete dataToInsert.id;
+      }
+
+      let { error } = await supabase.from('historical_projects').upsert([dataToInsert]);
+      if (error && (dataToInsert.website_url !== undefined || dataToInsert.segment !== undefined)) {
+        const { website_url, segment, ...fallbackData } = dataToInsert;
+        const retry = await supabase.from('historical_projects').upsert([fallbackData]);
+        error = retry.error;
+      }
+      if (error) console.error('Supabase insertHistoricalProject error:', error);
+      return !error;
+    } catch (err) {
+      console.error('Supabase insertHistoricalProject exception:', err);
+      return false;
+    }
+  }
+
+  public async updateHistoricalProject(id: string, data: Partial<HistoricalProject>): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+
+      // Remover ID mock
+      let dataToUpdate: any = this.packMetadataIntoNotes(data, ['website_url', 'segment']);
+      if (dataToUpdate.id && dataToUpdate.id.startsWith('hist-')) {
+        delete dataToUpdate.id;
+      }
+
+      let { error } = await supabase.from('historical_projects').update(dataToUpdate).eq('id', id);
+      if (error && (dataToUpdate.website_url !== undefined || dataToUpdate.segment !== undefined)) {
+        const { website_url, segment, ...fallbackData } = dataToUpdate;
+        const retry = await supabase.from('historical_projects').update(fallbackData).eq('id', id);
+        error = retry.error;
+      }
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async deleteHistoricalProject(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('historical_projects').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // ============================================================================
+  // TAREFAS
+  // ============================================================================
+  public async getTasks(): Promise<TaskItem[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .order('due_date', { ascending: true });
+      if (error || !data) return null;
+      return data as TaskItem[];
+    } catch {
+      return null;
+    }
+  }
+
+  public async insertTask(task: TaskItem): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const payload: any = { ...task };
+      if (payload.id && !isValidUUID(payload.id)) {
+        delete payload.id;
+      }
+      const { error } = await supabase.from('tasks').upsert([payload]);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async updateTask(id: string, data: Partial<TaskItem>): Promise<boolean> {
+    if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
+    try {
+      const supabase = getSupabase();
+      const payload: any = { ...data };
+      delete payload.id;
+      const { error } = await supabase.from('tasks').update(payload).eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async deleteTask(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('tasks').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // ============================================================================
+  // LANÇAMENTOS FINANCEIROS
+  // ============================================================================
+  public async getTransactions(): Promise<FinancialTransaction[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('financial_transactions')
+        .select('*')
+        .order('due_date', { ascending: false });
+      if (error || !data) return null;
+      return data as FinancialTransaction[];
+    } catch {
+      return null;
+    }
+  }
+
+  public async insertTransaction(tx: FinancialTransaction): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const payload: any = { ...tx };
+      if (payload.id && !isValidUUID(payload.id)) {
+        delete payload.id;
+      }
+      const { error } = await supabase.from('financial_transactions').upsert([payload]);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async updateTransaction(id: string, data: Partial<FinancialTransaction>): Promise<boolean> {
+    if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
+    try {
+      const supabase = getSupabase();
+      const payload: any = { ...data };
+      delete payload.id;
+      const { error } = await supabase.from('financial_transactions').update(payload).eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  public async deleteTransaction(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase.from('financial_transactions').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  // ============================================================================
+  // CATÁLOGO DE SERVIÇOS
+  // ============================================================================
+  public async getServices(): Promise<Service[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase
+        .from('services')
+        .select('*')
+        .order('created_at', { ascending: true });
+      if (error || !data) return null;
+      return data.map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        category: row.category,
+        description: row.description || '',
+        base_price: Number(row.base_price) || 0,
+        delivery_time_days: Number(row.delivery_time_days) || 7,
+        status: row.status || 'ativo',
+      })) as Service[];
+    } catch {
+      return null;
+    }
+  }
+
+  public async insertService(service: Service): Promise<Service | null> {
+    if (!isSupabaseConfigured()) return null;
+    try {
+      const supabase = getSupabase();
+      const payload: any = {
+        name: service.name,
+        category: service.category,
+        description: service.description || '',
+        base_price: Number(service.base_price) || 0,
+        delivery_time_days: Number(service.delivery_time_days) || 7,
+        status: service.status || 'ativo',
+      };
+      if (service.id && isValidUUID(service.id)) {
+        payload.id = service.id;
+      }
+      const { data, error } = await supabase.from('services').upsert([payload]).select();
+      if (error || !data || data.length === 0) return null;
+      const row = data[0];
+      return {
+        id: row.id,
+        name: row.name,
+        category: row.category,
+        description: row.description || '',
+        base_price: Number(row.base_price) || 0,
+        delivery_time_days: Number(row.delivery_time_days) || 7,
+        status: row.status || 'ativo',
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  public async updateService(id: string, data: Partial<Service>, originalName?: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      const payload: any = { updated_at: new Date().toISOString() };
+      if (data.name !== undefined) payload.name = data.name;
+      if (data.category !== undefined) payload.category = data.category;
+      if (data.description !== undefined) payload.description = data.description;
+      if (data.base_price !== undefined) payload.base_price = Number(data.base_price) || 0;
+      if (data.delivery_time_days !== undefined) payload.delivery_time_days = Number(data.delivery_time_days) || 7;
+      if (data.status !== undefined) payload.status = data.status;
+
+      if (isValidUUID(id)) {
+        const { error } = await supabase.from('services').update(payload).eq('id', id);
+        return !error;
+      } else if (originalName) {
+        const { error } = await supabase.from('services').update(payload).eq('name', originalName);
+        return !error;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  public async deleteService(id: string, name?: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    try {
+      const supabase = getSupabase();
+      if (isValidUUID(id)) {
+        const { error } = await supabase.from('services').delete().eq('id', id);
+        return !error;
+      } else if (name) {
+        const { error } = await supabase.from('services').delete().eq('name', name);
+        return !error;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+}
+
+export const dbService = new DatabaseService();
