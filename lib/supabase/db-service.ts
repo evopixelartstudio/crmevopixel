@@ -753,7 +753,14 @@ export class DatabaseService {
         .select('*')
         .order('due_date', { ascending: true });
       if (error || !data) return null;
-      return data as TaskItem[];
+      return data.map((row: any) => ({
+        id: row.id,
+        title: row.title || 'Tarefa',
+        related_to: row.related_to || row.description || 'Operação EvoPixel',
+        due_date: row.due_date || new Date().toISOString().split('T')[0],
+        status: row.status || 'pendente',
+        priority: row.priority || 'media',
+      })) as TaskItem[];
     } catch {
       return null;
     }
@@ -763,9 +770,15 @@ export class DatabaseService {
     if (!isSupabaseConfigured()) return false;
     try {
       const supabase = getSupabase();
-      const payload: any = { ...task };
-      if (payload.id && !isValidUUID(payload.id)) {
-        delete payload.id;
+      const payload: any = {
+        title: task.title,
+        description: task.related_to || 'Operação EvoPixel',
+        due_date: task.due_date,
+        status: task.status || 'pendente',
+        priority: task.priority || 'media',
+      };
+      if (task.id && isValidUUID(task.id)) {
+        payload.id = task.id;
       }
       const { error } = await supabase.from('tasks').upsert([payload]);
       return !error;
@@ -778,8 +791,12 @@ export class DatabaseService {
     if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
     try {
       const supabase = getSupabase();
-      const payload: any = { ...data };
-      delete payload.id;
+      const payload: any = {};
+      if (data.title !== undefined) payload.title = data.title;
+      if (data.related_to !== undefined) payload.description = data.related_to;
+      if (data.due_date !== undefined) payload.due_date = data.due_date;
+      if (data.status !== undefined) payload.status = data.status;
+      if (data.priority !== undefined) payload.priority = data.priority;
       const { error } = await supabase.from('tasks').update(payload).eq('id', id);
       return !error;
     } catch {
@@ -810,7 +827,20 @@ export class DatabaseService {
         .select('*')
         .order('due_date', { ascending: false });
       if (error || !data) return null;
-      return data as FinancialTransaction[];
+      return data.map((row: any) => {
+        const parsed = this.parseMetadataFromNotes(row);
+        return {
+          id: parsed.id,
+          title: parsed.title || 'Lançamento Financeiro',
+          client_name: parsed.client_name || parsed.title || 'Cliente',
+          category: parsed.category || 'Serviços',
+          amount_contracted: Number(parsed.amount_contracted) || 0,
+          amount_received: Number(parsed.amount_received) || 0,
+          amount_pending: Number(parsed.amount_pending) || 0,
+          due_date: parsed.due_date || new Date().toISOString().split('T')[0],
+          status: parsed.status || 'pendente',
+        } as FinancialTransaction;
+      });
     } catch {
       return null;
     }
@@ -820,9 +850,20 @@ export class DatabaseService {
     if (!isSupabaseConfigured()) return false;
     try {
       const supabase = getSupabase();
-      const payload: any = { ...tx };
-      if (payload.id && !isValidUUID(payload.id)) {
-        delete payload.id;
+      const packed = this.packMetadataIntoNotes(tx, ['client_name']);
+      const payload: any = {
+        title: tx.title,
+        type: 'receita',
+        category: tx.category || 'Serviços',
+        amount_contracted: Number(tx.amount_contracted) || 0,
+        amount_received: Number(tx.amount_received) || 0,
+        amount_pending: Number(tx.amount_pending) || 0,
+        due_date: tx.due_date,
+        status: tx.status || 'pendente',
+        notes: packed.notes,
+      };
+      if (tx.id && isValidUUID(tx.id)) {
+        payload.id = tx.id;
       }
       const { error } = await supabase.from('financial_transactions').upsert([payload]);
       return !error;
@@ -835,8 +876,16 @@ export class DatabaseService {
     if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
     try {
       const supabase = getSupabase();
-      const payload: any = { ...data };
-      delete payload.id;
+      const packed = this.packMetadataIntoNotes(data, ['client_name']);
+      const payload: any = {};
+      if (data.title !== undefined) payload.title = data.title;
+      if (data.category !== undefined) payload.category = data.category;
+      if (data.amount_contracted !== undefined) payload.amount_contracted = Number(data.amount_contracted) || 0;
+      if (data.amount_received !== undefined) payload.amount_received = Number(data.amount_received) || 0;
+      if (data.amount_pending !== undefined) payload.amount_pending = Number(data.amount_pending) || 0;
+      if (data.due_date !== undefined) payload.due_date = data.due_date;
+      if (data.status !== undefined) payload.status = data.status;
+      if (packed.notes !== undefined) payload.notes = packed.notes;
       const { error } = await supabase.from('financial_transactions').update(payload).eq('id', id);
       return !error;
     } catch {

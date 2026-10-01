@@ -55,6 +55,8 @@ import {
 import { dbService } from '@/lib/supabase/db-service';
 
 
+const normStr = (s?: string | null): string => (s || '').trim().toLowerCase();
+
 class CrmService {
   private services: Service[] = [...INITIAL_SERVICES];
   private niches: Niche[] = [...INITIAL_NICHES];
@@ -108,42 +110,69 @@ class CrmService {
       if (cachedLeads) {
         const parsed = JSON.parse(cachedLeads);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          this.leads = parsed;
+          this.leads = parsed.map((l: any) => ({
+            ...l,
+            name: l.name || 'Contato',
+            company_name: l.company_name || l.name || 'Empresa',
+          }));
         }
       }
       const cachedOpps = localStorage.getItem('evocrm_opps');
       if (cachedOpps) {
         const parsed = JSON.parse(cachedOpps);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          this.opportunities = parsed;
+          this.opportunities = parsed.map((o: any) => ({
+            ...o,
+            title: o.title || 'Oportunidade',
+            company_name: o.company_name || o.lead_name || 'Cliente',
+            lead_name: o.lead_name || o.company_name || 'Contato',
+          }));
         }
       }
       const cachedClients = localStorage.getItem('evocrm_clients');
       if (cachedClients) {
         const parsed = JSON.parse(cachedClients);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          this.clients = parsed;
+          this.clients = parsed.map((c: any) => ({
+            ...c,
+            name: c.name || c.company_name || 'Cliente',
+            company_name: c.company_name || c.name || 'Empresa',
+          }));
         }
       }
       const cachedProjects = localStorage.getItem('evocrm_projects');
       if (cachedProjects) {
         const parsed = JSON.parse(cachedProjects);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          this.projects = parsed;
+          this.projects = parsed.map((p: any) => ({
+            ...p,
+            name: p.name || 'Projeto',
+            company_name: p.company_name || p.client_name || p.name || 'Cliente',
+            client_name: p.client_name || p.company_name || 'Contato',
+            services: Array.isArray(p.services) ? p.services : [],
+          }));
         }
       }
       const cachedHistorical = localStorage.getItem('evocrm_historical_projects');
       if (cachedHistorical) {
         const parsed = JSON.parse(cachedHistorical);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          this.historicalProjects = parsed;
+          this.historicalProjects = parsed.map((hp: any) => ({
+            ...hp,
+            company_name: hp.company_name || hp.client_name || 'Cliente',
+            client_name: hp.client_name || hp.company_name || 'Contato',
+          }));
         }
       }
       const cachedMonthly = localStorage.getItem('evocrm_monthly_clients');
       if (cachedMonthly) {
         const parsed = JSON.parse(cachedMonthly);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          this.monthlyClients = parsed;
+          this.monthlyClients = parsed.map((m: any) => ({
+            ...m,
+            company_name: m.company_name || m.client_name || 'Cliente',
+            client_name: m.client_name || m.company_name || 'Contato',
+          }));
         }
       }
       const cachedServices = localStorage.getItem('evocrm_services');
@@ -157,14 +186,29 @@ class CrmService {
       if (cachedTasks) {
         const parsed = JSON.parse(cachedTasks);
         if (Array.isArray(parsed)) {
-          this.tasks = parsed;
+          this.tasks = parsed.map((t: any) => ({
+            ...t,
+            title: t.title || 'Tarefa',
+            related_to: t.related_to || t.description || 'Operação EvoPixel',
+            due_date: t.due_date || new Date().toISOString().split('T')[0],
+            status: t.status || 'pendente',
+            priority: t.priority || 'media',
+          }));
         }
       }
       const cachedTransactions = localStorage.getItem('evocrm_transactions');
       if (cachedTransactions) {
         const parsed = JSON.parse(cachedTransactions);
         if (Array.isArray(parsed)) {
-          this.transactions = parsed;
+          this.transactions = parsed.map((t: any) => ({
+            ...t,
+            title: t.title || 'Lançamento',
+            client_name: t.client_name || t.title || 'Cliente',
+            amount_contracted: Number(t.amount_contracted) || 0,
+            amount_received: Number(t.amount_received) || 0,
+            amount_pending: Number(t.amount_pending) || 0,
+            due_date: t.due_date || new Date().toISOString().split('T')[0],
+          }));
         }
       }
       const cachedExpenses = localStorage.getItem('evocrm_monthly_expenses');
@@ -235,33 +279,48 @@ class CrmService {
       }
       if (projects && projects.length > 0) {
         const localMap = new Map(this.projects.map(p => [p.id, p]));
-        this.projects = projects.map(p => ({
-          ...localMap.get(p.id),
-          ...p,
-          website_url: p.website_url || localMap.get(p.id)?.website_url,
-        }));
+        this.projects = projects.map(p => {
+          const local = localMap.get(p.id);
+          return {
+            ...local,
+            ...p,
+            name: p.name || local?.name || 'Projeto',
+            company_name: p.company_name || local?.company_name || p.client_name || p.name || 'Cliente',
+            client_name: p.client_name || local?.client_name || p.company_name || 'Contato',
+            services: Array.isArray(p.services) ? p.services : (local?.services || []),
+            website_url: p.website_url || local?.website_url,
+          };
+        });
         this.saveToLocalStorage('projects', this.projects);
         changed = true;
       }
       if (historical && historical.length > 0) {
         const localMap = new Map(this.historicalProjects.map(p => [p.id, p]));
-        this.historicalProjects = historical.map(p => ({
-          ...localMap.get(p.id),
-          ...p,
-          website_url: p.website_url || localMap.get(p.id)?.website_url,
-        }));
+        this.historicalProjects = historical.map(p => {
+          const local = localMap.get(p.id);
+          return {
+            ...local,
+            ...p,
+            company_name: p.company_name || local?.company_name || p.client_name || 'Cliente',
+            client_name: p.client_name || local?.client_name || p.company_name || 'Contato',
+            website_url: p.website_url || local?.website_url,
+          };
+        });
         this.saveToLocalStorage('historical_projects', this.historicalProjects);
         changed = true;
       }
       if (clients && clients.length > 0) { 
-        const localClientMap = new Map(this.clients.map(c => [c.company_name.toLowerCase(), c]));
+        const localClientMap = new Map(this.clients.map(c => [normStr(c.company_name), c]));
         this.clients = clients.map(c => {
-          const local = localClientMap.get(c.company_name.toLowerCase());
+          const cNorm = normStr(c.company_name);
+          const local = localClientMap.get(cNorm);
           const completedProjSite =
-            this.projects.find(p => p.status === 'concluido' && p.company_name.toLowerCase() === c.company_name.toLowerCase() && p.website_url)?.website_url ||
-            this.historicalProjects.find(p => p.company_name.toLowerCase() === c.company_name.toLowerCase() && p.website_url)?.website_url;
+            this.projects.find(p => p.status === 'concluido' && normStr(p.company_name) === cNorm && p.website_url)?.website_url ||
+            this.historicalProjects.find(p => normStr(p.company_name) === cNorm && p.website_url)?.website_url;
           return {
             ...c,
+            name: c.name || c.company_name || 'Cliente',
+            company_name: c.company_name || c.name || 'Empresa',
             website_url: c.website_url || local?.website_url || completedProjSite,
           };
         });
@@ -293,14 +352,22 @@ class CrmService {
       const hasLocalTasks =
         typeof window !== 'undefined' && localStorage.getItem('evocrm_tasks') !== null;
       if (!hasLocalTasks && tasks && tasks.length > 0) {
-        this.tasks = tasks;
+        this.tasks = tasks.map((t: any) => ({
+          ...t,
+          title: t.title || 'Tarefa',
+          related_to: t.related_to || t.description || 'Operação EvoPixel',
+        }));
         this.saveToLocalStorage('tasks', this.tasks);
         changed = true;
       }
       const hasLocalTx =
         typeof window !== 'undefined' && localStorage.getItem('evocrm_transactions') !== null;
       if (!hasLocalTx && transactions && transactions.length > 0) {
-        this.transactions = transactions;
+        this.transactions = transactions.map((t: any) => ({
+          ...t,
+          title: t.title || 'Lançamento',
+          client_name: t.client_name || t.title || 'Cliente',
+        }));
         this.saveToLocalStorage('transactions', this.transactions);
         changed = true;
       }
@@ -340,7 +407,7 @@ class CrmService {
         isDateInPeriod(t.due_date) &&
         !filteredHistorical.some(
           (hp) =>
-            hp.company_name.trim().toLowerCase() === t.client_name.trim().toLowerCase() &&
+            normStr(hp.company_name) === normStr(t.client_name) &&
             hp.amount_contracted === t.amount_contracted &&
             hp.project_date === t.due_date
         )
@@ -353,8 +420,6 @@ class CrmService {
     const monthlyPaidThisMonth = this.monthlyClients
       .filter((c) => c.status === 'ativo' && c.current_month_status === 'pago')
       .reduce((acc, c) => acc + (c.monthly_value || 0), 0);
-    // If period is not historico/ano/30d, maybe monthly shouldn't count? We leave it for now or assume it counts if period includes this month. 
-    // Usually MRR is counted as this month.
     const totalAccumulated = historicalReceived + activeReceived + (['hoje','7d'].includes(period) ? 0 : monthlyPaidThisMonth);
 
     const historicalPending = filteredHistorical.reduce((acc, p) => acc + (p.amount_pending || 0), 0);
@@ -406,7 +471,7 @@ class CrmService {
         index: `0${attentionItems.length + 1}`,
         type: 'lead_hot',
         title: 'Lead quente aguardando ação',
-        target: l.company_name || l.name,
+        target: l.company_name || l.name || 'Lead',
         detail: l.segment || 'Sem interação recente',
         actionLabel: 'Abrir lead',
         link: `/leads/${l.id}`,
@@ -423,8 +488,8 @@ class CrmService {
         index: `0${attentionItems.length + 1}`,
         type: 'proposal_pending',
         title: 'Proposta aguardando retorno',
-        target: p.company_name || p.client_name,
-        detail: `R$ ${p.total.toLocaleString('pt-BR')}`,
+        target: p.company_name || p.client_name || 'Cliente',
+        detail: `R$ ${(Number(p.total) || 0).toLocaleString('pt-BR')}`,
         actionLabel: 'Ver proposta',
         link: '/propostas',
       });
@@ -438,8 +503,8 @@ class CrmService {
         index: `0${attentionItems.length + 1}`,
         type: 'followup_overdue',
         title: 'Tarefa pendente / atrasada',
-        target: t.related_to || t.title,
-        detail: `Prazo: ${new Date(t.due_date).toLocaleDateString('pt-BR')}`,
+        target: t.related_to || t.title || 'Tarefa',
+        detail: `Prazo: ${t.due_date ? new Date(t.due_date).toLocaleDateString('pt-BR') : '—'}`,
         actionLabel: 'Ver tarefa',
         link: '/tarefas',
       });
@@ -455,8 +520,8 @@ class CrmService {
         index: `0${attentionItems.length + 1}`,
         type: 'payment_overdue',
         title: 'Mensalidade atrasada',
-        target: c.company_name || c.client_name,
-        detail: `R$ ${c.monthly_value.toLocaleString('pt-BR')} — Vencimento dia ${c.billing_day}`,
+        target: c.company_name || c.client_name || 'Cliente',
+        detail: `R$ ${(Number(c.monthly_value) || 0).toLocaleString('pt-BR')} — Vencimento dia ${c.billing_day || 10}`,
         actionLabel: 'Ver mensalistas',
         link: '/mensalidades',
       });
@@ -676,8 +741,8 @@ class CrmService {
     [...standardChecklistTasks].reverse().forEach((taskTitle, idx) => {
       const alreadyExists = this.tasks.some(
         (t) =>
-          t.related_to.trim().toLowerCase() === projectLabel.toLowerCase() &&
-          t.title.trim().toLowerCase() === taskTitle.toLowerCase()
+          normStr(t.related_to) === normStr(projectLabel) &&
+          normStr(t.title) === normStr(taskTitle)
       );
       if (!alreadyExists) {
         const newTask: TaskItem = {
@@ -699,13 +764,13 @@ class CrmService {
 
     // Garantir também a criação do projeto ativo na aba Projetos se ainda não existir
     const existingProj = this.projects.find(
-      (p) => p.company_name.trim().toLowerCase() === projectLabel.toLowerCase() && p.status !== 'concluido'
+      (p) => normStr(p.company_name) === normStr(projectLabel) && p.status !== 'concluido'
     );
     if (!existingProj) {
       const lead = this.leads.find(
         (l) =>
           l.id === opp.lead_id ||
-          l.company_name.trim().toLowerCase() === projectLabel.toLowerCase()
+          normStr(l.company_name) === normStr(projectLabel)
       );
       this.addProject({
         client_name: opp.lead_name || lead?.name || projectLabel,
@@ -746,7 +811,7 @@ class CrmService {
     const lead = this.leads.find(
       (l) =>
         l.id === opp.lead_id ||
-        l.company_name.trim().toLowerCase() === companyName.toLowerCase()
+        normStr(l.company_name) === normStr(companyName)
     );
     if (lead && lead.status !== 'convertido') {
       lead.status = 'convertido';
@@ -758,7 +823,7 @@ class CrmService {
     const alreadyInHistory = this.historicalProjects.some(
       (hp) =>
         (hp.notes && hp.notes.includes(opp.id)) ||
-        (hp.company_name.trim().toLowerCase() === companyName.toLowerCase() &&
+        (normStr(hp.company_name) === normStr(companyName) &&
           hp.amount_contracted === projectValue &&
           hp.project_date === today)
     );
@@ -779,7 +844,7 @@ class CrmService {
     } else {
       // Garantir que o cliente exista na lista de clientes mesmo se já estava no histórico
       const existingClient = this.clients.find(
-        (c) => c.company_name.trim().toLowerCase() === companyName.toLowerCase()
+        (c) => normStr(c.company_name) === normStr(companyName)
       );
       if (!existingClient) {
         this.addClient({
@@ -803,7 +868,7 @@ class CrmService {
 
     // Enriquecer dados de contato do cliente a partir do Lead
     const clientRecord = this.clients.find(
-      (c) => c.company_name.trim().toLowerCase() === companyName.toLowerCase()
+      (c) => normStr(c.company_name) === normStr(companyName)
     );
     if (clientRecord && lead) {
       if (!clientRecord.email && lead.email) clientRecord.email = lead.email;
@@ -823,7 +888,7 @@ class CrmService {
     // 3. Registrar nas Finanças (Lançamento Financeiro)
     const alreadyInFinance = this.transactions.some(
       (t) =>
-        t.client_name.trim().toLowerCase() === companyName.toLowerCase() &&
+        normStr(t.client_name) === normStr(companyName) &&
         t.amount_contracted === projectValue &&
         t.due_date === today
     );
@@ -1010,7 +1075,7 @@ class CrmService {
 
   public getClientWebsites(companyName: string, clientDirectWebsite?: string): string[] {
     const urls = new Set<string>();
-    const normCompany = (companyName || '').trim().toLowerCase();
+    const normCompany = normStr(companyName);
     if (clientDirectWebsite && clientDirectWebsite.trim()) {
       urls.add(clientDirectWebsite.trim());
     }
@@ -1019,7 +1084,7 @@ class CrmService {
         p.status === 'concluido' &&
         p.website_url &&
         p.website_url.trim() &&
-        p.company_name.trim().toLowerCase() === normCompany
+        normStr(p.company_name) === normCompany
       ) {
         urls.add(p.website_url.trim());
       }
@@ -1028,7 +1093,7 @@ class CrmService {
       if (
         hp.website_url &&
         hp.website_url.trim() &&
-        hp.company_name.trim().toLowerCase() === normCompany
+        normStr(hp.company_name) === normCompany
       ) {
         urls.add(hp.website_url.trim());
       }
@@ -1268,8 +1333,8 @@ class CrmService {
   private syncClientWithCompletedProject(proj: Project) {
     let client = this.clients.find(
       c =>
-        c.company_name.trim().toLowerCase() === proj.company_name.trim().toLowerCase() ||
-        (c.name && proj.client_name && c.name.trim().toLowerCase() === proj.client_name.trim().toLowerCase())
+        normStr(c.company_name) === normStr(proj.company_name) ||
+        (c.name && proj.client_name && normStr(c.name) === normStr(proj.client_name))
     );
 
     const contracted = proj.amount_contracted || 0;
@@ -1291,12 +1356,12 @@ class CrmService {
         last_project_at: proj.deadline || new Date().toISOString().split('T')[0],
       });
     } else {
-      const normCompany = client.company_name.trim().toLowerCase();
+      const normCompany = normStr(client.company_name);
       const histProjects = this.historicalProjects.filter(
-        p => p.company_name.trim().toLowerCase() === normCompany
+        p => normStr(p.company_name) === normCompany
       );
       const completedActiveProjects = this.projects.filter(
-        p => p.status === 'concluido' && p.company_name.trim().toLowerCase() === normCompany
+        p => p.status === 'concluido' && normStr(p.company_name) === normCompany
       );
 
       const histContracted = histProjects.reduce((sum, p) => sum + (p.amount_contracted || 0), 0);
@@ -1329,8 +1394,8 @@ class CrmService {
 
   private syncClientWithHistoricalProject(proj: HistoricalProject) {
     let client = this.clients.find(
-      c => c.company_name.trim().toLowerCase() === proj.company_name.trim().toLowerCase() || 
-           (c.name && proj.client_name && c.name.trim().toLowerCase() === proj.client_name.trim().toLowerCase())
+      c => normStr(c.company_name) === normStr(proj.company_name) || 
+           (c.name && proj.client_name && normStr(c.name) === normStr(proj.client_name))
     );
 
     if (!client) {
@@ -1348,10 +1413,10 @@ class CrmService {
         last_project_at: proj.project_date,
       });
     } else {
-      const normCompany = client.company_name.trim().toLowerCase();
-      const histProjects = this.historicalProjects.filter(p => p.company_name.trim().toLowerCase() === normCompany);
+      const normCompany = normStr(client.company_name);
+      const histProjects = this.historicalProjects.filter(p => normStr(p.company_name) === normCompany);
       const completedActiveProjects = this.projects.filter(
-        p => p.status === 'concluido' && p.company_name.trim().toLowerCase() === normCompany
+        p => p.status === 'concluido' && normStr(p.company_name) === normCompany
       );
       const activeContracted = completedActiveProjects.reduce((sum, p) => sum + (p.amount_contracted || 0), 0);
       const activeReceived = completedActiveProjects.reduce(
@@ -1387,7 +1452,7 @@ class CrmService {
       (t) =>
         !this.historicalProjects.some(
           (hp) =>
-            hp.company_name.trim().toLowerCase() === t.client_name.trim().toLowerCase() &&
+            normStr(hp.company_name) === normStr(t.client_name) &&
             hp.amount_contracted === t.amount_contracted &&
             hp.project_date === t.due_date
         )
@@ -1474,7 +1539,7 @@ class CrmService {
           if (d.getFullYear() !== currentYear || d.getMonth() !== m.key) return false;
           const isDuplicatedInHist = this.historicalProjects.some(
             (hp) =>
-              hp.company_name.trim().toLowerCase() === t.client_name.trim().toLowerCase() &&
+              normStr(hp.company_name) === normStr(t.client_name) &&
               hp.amount_contracted === t.amount_contracted &&
               hp.project_date === t.due_date
           );
@@ -1698,7 +1763,7 @@ class CrmService {
       (t) =>
         !this.historicalProjects.some(
           (hp) =>
-            hp.company_name.trim().toLowerCase() === t.client_name.trim().toLowerCase() &&
+            normStr(hp.company_name) === normStr(t.client_name) &&
             hp.amount_contracted === t.amount_contracted &&
             hp.project_date === t.due_date
         )
@@ -1982,7 +2047,7 @@ class CrmService {
   // Ações de escrita diretas acionadas pelo Assistant
   public registerPaymentViaAssistant(clientName: string, amount: number, method: string = 'pix') {
     // Localizar ou associar
-    const tx = this.transactions.find(t => t.client_name.toLowerCase().includes(clientName.toLowerCase()) && t.status !== 'pago');
+    const tx = this.transactions.find(t => normStr(t.client_name).includes(normStr(clientName)) && t.status !== 'pago');
     const beforeData = tx ? { ...tx } : null;
 
     if (tx) {

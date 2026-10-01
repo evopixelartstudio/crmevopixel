@@ -392,12 +392,12 @@ export default function DashboardPage() {
                     <div>
                       <div className="text-xs font-medium text-[#E7ECE8]">{task.title}</div>
                       <div className="text-[10px] text-[#8EB69B] font-mono">
-                        Cliente / Projeto: {task.related_to}
+                        Cliente / Projeto: {task.related_to || 'Operação EvoPixel'}
                       </div>
                     </div>
                   </div>
                   <span className="text-[10px] font-mono text-[#65706A]">
-                    {new Date(task.due_date).toLocaleDateString('pt-BR')}
+                    {task.due_date ? new Date(task.due_date).toLocaleDateString('pt-BR') : '—'}
                   </span>
                 </div>
               ))}

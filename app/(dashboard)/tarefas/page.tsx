@@ -59,8 +59,8 @@ export default function TarefasPage() {
         .getTasks()
         .some(
           (t) =>
-            t.related_to.trim().toLowerCase() === projectName.trim().toLowerCase() &&
-            t.title.trim().toLowerCase() === item.toLowerCase()
+            (t.related_to || '').trim().toLowerCase() === projectName.trim().toLowerCase() &&
+            (t.title || '').trim().toLowerCase() === item.toLowerCase()
         );
       if (!exists) {
         crmService.addTask({
