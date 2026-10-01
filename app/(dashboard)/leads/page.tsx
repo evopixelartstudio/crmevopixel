@@ -283,18 +283,14 @@ export default function LeadsPage() {
 
   const handleDeleteLead = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('Deseja realmente remover este lead?')) {
-      crmService.deleteLead(id);
-      setSelectedLeadIds((prev) => prev.filter((item) => item !== id));
-    }
+    crmService.deleteLead(id);
+    setSelectedLeadIds((prev) => prev.filter((item) => item !== id));
   };
 
   const handleBulkDelete = () => {
     if (selectedLeadIds.length === 0) return;
-    if (confirm(`Deseja realmente excluir os ${selectedLeadIds.length} leads selecionados?`)) {
-      crmService.deleteLeads(selectedLeadIds);
-      setSelectedLeadIds([]);
-    }
+    crmService.deleteLeads(selectedLeadIds);
+    setSelectedLeadIds([]);
   };
 
   const handleSelectAll = () => {
@@ -311,11 +307,20 @@ export default function LeadsPage() {
     );
   };
 
-  // Colocar no Pipeline na etapa Primeiro Contato
+  // Colocar no Pipeline na etapa Primeiro Contato (e retirar da lista de Leads)
   const addToPipeline = (lead: Lead, reason = 'Primeiro Contato') => {
     const opps = crmService.getOpportunities();
-    const existing = opps.find((o) => o.lead_id === lead.id);
-    if (existing) return existing;
+    const existing = opps.find(
+      (o) =>
+        o.lead_id === lead.id ||
+        (o.company_name || '').trim().toLowerCase() === (lead.company_name || '').trim().toLowerCase()
+    );
+    if (existing) {
+      if (lead.status !== 'em_contato' && lead.status !== 'convertido') {
+        crmService.updateLeadStatus(lead.id, 'em_contato');
+      }
+      return existing;
+    }
 
     return crmService.addOpportunity({
       lead_id: lead.id,
@@ -339,34 +344,25 @@ export default function LeadsPage() {
       alert(`O lead "${lead.company_name}" não possui número de WhatsApp válido cadastrado.`);
       return;
     }
-    // Ao iniciar o primeiro contato via WhatsApp, move/adiciona automaticamente ao Pipeline
+    // Ao iniciar o primeiro contato via WhatsApp, move automaticamente para o Pipeline e sai da lista de Leads
     addToPipeline(lead, 'Primeiro Contato via WhatsApp');
     openWhatsApp(lead.whatsapp);
   };
 
   const handleAddToPipeline = (lead: Lead, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    const opps = crmService.getOpportunities();
-    const existing = opps.find((o) => o.lead_id === lead.id);
-    if (existing) {
-      alert(`O lead "${lead.company_name}" já está no Pipeline no estágio "${existing.stage_slug.replace('_', ' ')}".`);
-      return;
-    }
-    addToPipeline(lead, 'Colocado manualmente no Pipeline');
-    alert(`"${lead.company_name}" adicionado com sucesso ao Pipeline na etapa "Primeiro Contato"!`);
+    addToPipeline(lead, 'Marcado como Primeiro Contato');
+    setSelectedLeadIds((prev) => prev.filter((id) => id !== lead.id));
   };
 
   const handleBulkAddToPipeline = () => {
     if (selectedLeadIds.length === 0) return;
-    let addedCount = 0;
     selectedLeadIds.forEach((id) => {
       const lead = leads.find((l) => l.id === id);
       if (lead) {
-        const added = addToPipeline(lead, 'Primeiro Contato (Seleção em Lote)');
-        if (added) addedCount++;
+        addToPipeline(lead, 'Primeiro Contato (Seleção em Lote)');
       }
     });
-    alert(`${addedCount} lead(s) adicionados ao Pipeline na etapa "Primeiro Contato"!`);
     setSelectedLeadIds([]);
   };
 
@@ -395,10 +391,21 @@ export default function LeadsPage() {
   };
 
   const filteredLeads = leads.filter((lead) => {
+    // Leads marcados como Primeiro Contato / já enviados ao Pipeline saem da lista de Leads
+    const isAlreadyInPipeline =
+      lead.status === 'em_contato' ||
+      lead.status === 'convertido' ||
+      opportunities.some(
+        (o) =>
+          o.lead_id === lead.id ||
+          (o.company_name || '').trim().toLowerCase() === (lead.company_name || '').trim().toLowerCase()
+      );
+    if (isAlreadyInPipeline) return false;
+
     const matchesSearch =
-      lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.company_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.segment.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (lead.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (lead.company_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (lead.segment || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (lead.city && lead.city.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (lead.whatsapp && lead.whatsapp.includes(searchTerm)) ||
       (lead.instagram && lead.instagram.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -408,7 +415,7 @@ export default function LeadsPage() {
       selectedTemperature === 'todos' || lead.temperature === selectedTemperature;
 
     const matchesNiche =
-      selectedNiche === 'todos' || lead.segment.toLowerCase() === selectedNiche.toLowerCase();
+      selectedNiche === 'todos' || (lead.segment || '').toLowerCase() === selectedNiche.toLowerCase();
 
     return matchesSearch && matchesTemp && matchesNiche;
   });

@@ -109,7 +109,7 @@ class CrmService {
       const cachedLeads = localStorage.getItem('evocrm_leads');
       if (cachedLeads) {
         const parsed = JSON.parse(cachedLeads);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           this.leads = parsed.map((l: any) => ({
             ...l,
             name: l.name || 'Contato',
@@ -120,7 +120,7 @@ class CrmService {
       const cachedOpps = localStorage.getItem('evocrm_opps');
       if (cachedOpps) {
         const parsed = JSON.parse(cachedOpps);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           this.opportunities = parsed.map((o: any) => ({
             ...o,
             title: o.title || 'Oportunidade',
@@ -132,7 +132,7 @@ class CrmService {
       const cachedClients = localStorage.getItem('evocrm_clients');
       if (cachedClients) {
         const parsed = JSON.parse(cachedClients);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           this.clients = parsed.map((c: any) => ({
             ...c,
             name: c.name || c.company_name || 'Cliente',
@@ -143,7 +143,7 @@ class CrmService {
       const cachedProjects = localStorage.getItem('evocrm_projects');
       if (cachedProjects) {
         const parsed = JSON.parse(cachedProjects);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           this.projects = parsed.map((p: any) => ({
             ...p,
             name: p.name || 'Projeto',
@@ -156,7 +156,7 @@ class CrmService {
       const cachedHistorical = localStorage.getItem('evocrm_historical_projects');
       if (cachedHistorical) {
         const parsed = JSON.parse(cachedHistorical);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           this.historicalProjects = parsed.map((hp: any) => ({
             ...hp,
             company_name: hp.company_name || hp.client_name || 'Cliente',
@@ -167,7 +167,7 @@ class CrmService {
       const cachedMonthly = localStorage.getItem('evocrm_monthly_clients');
       if (cachedMonthly) {
         const parsed = JSON.parse(cachedMonthly);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           this.monthlyClients = parsed.map((m: any) => ({
             ...m,
             company_name: m.company_name || m.client_name || 'Cliente',
@@ -332,17 +332,21 @@ class CrmService {
         this.saveToLocalStorage('monthly_clients', this.monthlyClients);
         changed = true;
       }
-      if (leads && leads.length > 0) { 
+      const hasLocalLeads =
+        typeof window !== 'undefined' && localStorage.getItem('evocrm_leads') !== null;
+      if (!hasLocalLeads && leads && leads.length > 0) { 
         const supabaseIds = new Set(leads.map(l => l.id));
         const localUnsynced = this.leads.filter(l => !supabaseIds.has(l.id));
         this.leads = [...leads, ...localUnsynced];
         this.saveToLocalStorage('leads', this.leads);
         changed = true; 
-      } else if (this.leads.length > 0) {
+      } else if (!hasLocalLeads && this.leads.length > 0) {
         this.leads.forEach(l => dbService.insertLead(l));
       }
       if (prospects && prospects.length > 0) { this.prospects = prospects; changed = true; }
-      if (opps && opps.length > 0) { 
+      const hasLocalOpps =
+        typeof window !== 'undefined' && localStorage.getItem('evocrm_opps') !== null;
+      if (!hasLocalOpps && opps && opps.length > 0) { 
         this.opportunities = opps; 
         this.saveToLocalStorage('opps', this.opportunities);
         changed = true; 
@@ -956,6 +960,16 @@ class CrmService {
     dbService.insertOpportunity(newOpp);
     this.saveToLocalStorage('opps', this.opportunities);
 
+    // Quando o lead entra no Pipeline (ex: Primeiro Contato), marca como 'em_contato' e retira da fila inicial de Leads
+    const linkedLead = this.leads.find(
+      (l) => l.id === newOpp.lead_id || normStr(l.company_name) === normStr(newOpp.company_name)
+    );
+    if (linkedLead && linkedLead.status !== 'convertido') {
+      linkedLead.status = 'em_contato';
+      this.saveToLocalStorage('leads', this.leads);
+      dbService.updateLead(linkedLead.id, { status: 'em_contato' });
+    }
+
     if (newOpp.stage_slug === 'projeto_em_andamento') {
       this.handleOpportunityEnteredProjectInProgress(newOpp);
     } else if (newOpp.stage_slug === 'fechado') {
@@ -966,10 +980,67 @@ class CrmService {
     return newOpp;
   }
 
+  public updateOpportunity(id: string, data: Partial<Opportunity>): Opportunity | undefined {
+    const opp = this.opportunities.find(o => o.id === id);
+    if (!opp) return undefined;
+
+    const previousStage = opp.stage_slug;
+    const now = new Date().toISOString();
+    Object.assign(opp, data, { updated_at: now });
+
+    if (data.stage_slug && data.stage_slug !== previousStage) {
+      opp.stage_entered_at = now;
+      if (data.stage_slug === 'fechado') {
+        opp.probability = 100;
+      } else if (data.stage_slug === 'projeto_em_andamento') {
+        opp.probability = 90;
+      }
+    }
+
+    // Sincronizar alterações com o Lead vinculado, se existir
+    const linkedLead = this.leads.find(
+      (l) => l.id === opp.lead_id || normStr(l.company_name) === normStr(opp.company_name)
+    );
+    if (linkedLead) {
+      if (data.company_name !== undefined) linkedLead.company_name = data.company_name;
+      if (data.lead_name !== undefined) linkedLead.name = data.lead_name;
+      if (data.temperature !== undefined) linkedLead.temperature = data.temperature;
+      if (data.services !== undefined) linkedLead.services = data.services;
+      this.saveToLocalStorage('leads', this.leads);
+      dbService.updateLead(linkedLead.id, linkedLead);
+    }
+
+    this.saveToLocalStorage('opps', this.opportunities);
+    dbService.updateOpportunity(id, opp);
+
+    if (opp.stage_slug === 'projeto_em_andamento' && previousStage !== 'projeto_em_andamento') {
+      this.handleOpportunityEnteredProjectInProgress(opp);
+    } else if (opp.stage_slug === 'fechado' && previousStage !== 'fechado') {
+      this.handleOpportunityClosed(opp);
+    }
+
+    this.notify();
+    return opp;
+  }
+
   public deleteOpportunity(id: string): void {
+    const targetOpp = this.opportunities.find(o => o.id === id);
     this.opportunities = this.opportunities.filter(o => o.id !== id);
     dbService.deleteOpportunity(id);
     this.saveToLocalStorage('opps', this.opportunities);
+
+    // Remover também o lead vinculado para que não volte a aparecer na lista de Leads
+    if (targetOpp) {
+      const matchingLead = this.leads.find(
+        (l) => l.id === targetOpp.lead_id || normStr(l.company_name) === normStr(targetOpp.company_name)
+      );
+      if (matchingLead) {
+        this.leads = this.leads.filter((l) => l.id !== matchingLead.id);
+        this.saveToLocalStorage('leads', this.leads);
+        dbService.deleteLead(matchingLead.id);
+      }
+    }
+
     this.notify();
   }
 

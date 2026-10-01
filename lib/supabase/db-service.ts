@@ -432,6 +432,19 @@ export class DatabaseService {
     }
   }
 
+  public async updateOpportunity(id: string, data: Partial<Opportunity>): Promise<boolean> {
+    if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
+    try {
+      const supabase = getSupabase();
+      const payload: any = { ...data, updated_at: new Date().toISOString() };
+      delete payload.id;
+      const { error } = await supabase.from('opportunities').update(payload).eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
   public async deleteOpportunity(id: string): Promise<boolean> {
     if (!isSupabaseConfigured()) return false;
     try {

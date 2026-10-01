@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { crmService } from '@/lib/services/crm-service';
 import { useCrmSync } from '@/lib/hooks/useCrmSync';
-import { Opportunity } from '@/types/database';
+import { Opportunity, Temperature } from '@/types/database';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -13,11 +13,10 @@ import {
   Plus,
   ArrowRight,
   ArrowLeft,
-  DollarSign,
-  Flame,
   Clock,
-  Sparkles,
   Zap,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 
 const STAGES = [
@@ -35,6 +34,20 @@ export default function PipelinePage() {
     crmService.getOpportunities()
   );
   const [isNewOppModalOpen, setIsNewOppModalOpen] = useState(false);
+
+  // Estado de edição e exclusão
+  const [editingOpp, setEditingOpp] = useState<Opportunity | null>(null);
+  const [deletingOppId, setDeletingOppId] = useState<string | null>(null);
+
+  // Campos do modal de edição
+  const [editTitle, setEditTitle] = useState('');
+  const [editCompany, setEditCompany] = useState('');
+  const [editContact, setEditContact] = useState('');
+  const [editValue, setEditValue] = useState('');
+  const [editStage, setEditStage] = useState('primeiro_contato');
+  const [editTemperature, setEditTemperature] = useState<Temperature>('quente');
+  const [editProbability, setEditProbability] = useState('50');
+  const [editServices, setEditServices] = useState('');
 
   // Monitorar regra de 24h em Proposta e sincronizar dados
   useEffect(() => {
@@ -57,7 +70,7 @@ export default function PipelinePage() {
     };
   }, []);
 
-  // Form states
+  // Form states (Nova Oportunidade)
   const [newTitle, setNewTitle] = useState('');
   const [newCompany, setNewCompany] = useState('');
   const [newContact, setNewContact] = useState('');
@@ -79,6 +92,57 @@ export default function PipelinePage() {
         ? Math.min(STAGES.length - 1, currentIndex + 1)
         : Math.max(0, currentIndex - 1);
     setStage(oppId, STAGES[newIndex].slug);
+  };
+
+  const handleOpenEditModal = (opp: Opportunity, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setEditingOpp(opp);
+    setEditTitle(opp.title || '');
+    setEditCompany(opp.company_name || '');
+    setEditContact(opp.lead_name || '');
+    setEditValue(String(opp.estimated_value ?? 0));
+    setEditStage(opp.stage_slug === 'negociacao' ? 'proposta' : opp.stage_slug);
+    setEditTemperature(opp.temperature || 'quente');
+    setEditProbability(String(opp.probability ?? 50));
+    setEditServices((opp.services || []).join(', '));
+  };
+
+  const handleSaveEditOpp = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingOpp) return;
+    if (!editCompany.trim() || !editTitle.trim()) {
+      alert('Preencha ao menos o Título e a Empresa.');
+      return;
+    }
+
+    const parsedServices = editServices
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    crmService.updateOpportunity(editingOpp.id, {
+      title: editTitle.trim(),
+      company_name: editCompany.trim(),
+      lead_name: editContact.trim() || editCompany.trim(),
+      estimated_value: Number(editValue) || 0,
+      stage_slug: editStage,
+      temperature: editTemperature,
+      probability: Math.min(100, Math.max(0, Number(editProbability) || 0)),
+      services: parsedServices.length > 0 ? parsedServices : ['Site Institucional'],
+    });
+
+    setOpportunities([...crmService.getOpportunities()]);
+    setEditingOpp(null);
+  };
+
+  const handleDeleteOpp = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    crmService.deleteOpportunity(id);
+    setOpportunities([...crmService.getOpportunities()]);
+    setDeletingOppId(null);
+    if (editingOpp?.id === id) {
+      setEditingOpp(null);
+    }
   };
 
   const handleCreateOpp = (e: React.FormEvent) => {
@@ -123,7 +187,7 @@ export default function PipelinePage() {
 
   const totalPipelineValue = opportunities
     .filter((o) => o.stage_slug !== 'lead_perdido' && o.stage_slug !== 'perdido' && o.stage_slug !== 'fechado')
-    .reduce((acc, o) => acc + o.estimated_value, 0);
+    .reduce((acc, o) => acc + (o.estimated_value || 0), 0);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
@@ -168,7 +232,7 @@ export default function PipelinePage() {
           const stageOpps = opportunities.filter(
             (o) => o.stage_slug === stage.slug || (stage.slug === 'proposta' && o.stage_slug === 'negociacao')
           );
-          const stageTotal = stageOpps.reduce((acc, o) => acc + o.estimated_value, 0);
+          const stageTotal = stageOpps.reduce((acc, o) => acc + (o.estimated_value || 0), 0);
 
           return (
             <div
@@ -208,13 +272,56 @@ export default function PipelinePage() {
                     className="p-3.5 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.22)] cursor-grab active:cursor-grabbing transition-all group shadow-sm flex flex-col justify-between space-y-2.5"
                   >
                     <div>
-                      <div className="flex items-start justify-between gap-1 mb-1">
+                      <div className="flex items-start justify-between gap-1.5 mb-1">
                         <span className="text-xs font-semibold text-[#E7ECE8] font-heading leading-snug">
                           {opp.company_name}
                         </span>
-                        <Badge temperature={opp.temperature} className="text-[9px] py-0 px-1">
-                          {opp.score}
-                        </Badge>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Badge temperature={opp.temperature} className="text-[9px] py-0 px-1">
+                            {opp.score}
+                          </Badge>
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenEditModal(opp, e)}
+                            className="p-1 rounded-lg bg-[#07100F]/70 hover:bg-[#163832] text-[#9BA6A0] hover:text-[#F1F9A1] transition-colors"
+                            title="Editar lead / oportunidade"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          {deletingOppId === opp.id ? (
+                            <div className="flex items-center gap-1 bg-red-500/15 border border-red-500/30 rounded-lg px-1.5 py-0.5">
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteOpp(opp.id, e)}
+                                className="text-[9px] font-semibold text-red-400 hover:text-red-300"
+                              >
+                                Excluir
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeletingOppId(null);
+                                }}
+                                className="text-[9px] text-[#9BA6A0] hover:text-[#E7ECE8]"
+                              >
+                                Não
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeletingOppId(opp.id);
+                              }}
+                              className="p-1 rounded-lg bg-[#07100F]/70 hover:bg-red-500/20 text-[#65706A] hover:text-red-400 transition-colors"
+                              title="Excluir do Pipeline"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       <p className="text-[11px] text-[#9BA6A0] leading-snug truncate">
@@ -223,7 +330,7 @@ export default function PipelinePage() {
 
                       <div className="flex items-center justify-between mt-2 pt-2 border-t border-[rgba(218,241,222,0.04)]">
                         <span className="text-xs font-semibold font-mono text-[#F1F9A1]">
-                          R$ {opp.estimated_value.toLocaleString('pt-BR')}
+                          R$ {(opp.estimated_value || 0).toLocaleString('pt-BR')}
                         </span>
                         <span className="text-[10px] text-[#65706A]">
                           {opp.probability}% prob.
@@ -284,9 +391,10 @@ export default function PipelinePage() {
                       </div>
                     )}
 
-                    {/* Controles de Transição de Etapa */}
+                    {/* Controles de Transição de Etapa e Edição */}
                     <div className="flex items-center justify-between pt-1 text-xs">
                       <button
+                        type="button"
                         onClick={() => moveStage(opp.id, 'prev')}
                         disabled={stageIndex === 0}
                         className="p-1 rounded text-[#65706A] hover:text-[#E7ECE8] disabled:opacity-20 hover:bg-[#07100F] transition-all"
@@ -295,14 +403,16 @@ export default function PipelinePage() {
                         <ArrowLeft className="w-3.5 h-3.5" />
                       </button>
 
-                      <Link
-                        href={`/leads/${opp.lead_id}`}
-                        className="text-[10px] text-[#8EB69B] hover:text-[#F1F9A1] transition-colors"
+                      <button
+                        type="button"
+                        onClick={(e) => handleOpenEditModal(opp, e)}
+                        className="text-[10px] text-[#8EB69B] hover:text-[#F1F9A1] transition-colors font-medium"
                       >
-                        Abrir lead
-                      </Link>
+                        Editar lead
+                      </button>
 
                       <button
+                        type="button"
                         onClick={() => moveStage(opp.id, 'next')}
                         disabled={stageIndex === STAGES.length - 1}
                         className="p-1 rounded text-[#65706A] hover:text-[#E7ECE8] disabled:opacity-20 hover:bg-[#07100F] transition-all"
@@ -324,6 +434,144 @@ export default function PipelinePage() {
           );
         })}
       </div>
+
+      {/* Modal Editar Lead / Oportunidade no Pipeline */}
+      <Modal
+        isOpen={!!editingOpp}
+        onClose={() => setEditingOpp(null)}
+        title="Editar Lead no Pipeline"
+        subtitle="Atualize os dados, valor do projeto, serviços ou estágio desta oportunidade."
+      >
+        <form onSubmit={handleSaveEditOpp} className="space-y-4 text-xs">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">Nome da Empresa *</label>
+              <input
+                type="text"
+                required
+                value={editCompany}
+                onChange={(e) => setEditCompany(e.target.value)}
+                placeholder="Ex: Evelyn Alcaires Advocacia"
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+              />
+            </div>
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">Nome do Contato</label>
+              <input
+                type="text"
+                value={editContact}
+                onChange={(e) => setEditContact(e.target.value)}
+                placeholder="Ex: Dra. Evelyn"
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[#9BA6A0] mb-1 font-medium">Título / Escopo Principal *</label>
+            <input
+              type="text"
+              required
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              placeholder="Ex: Landing Page + Automação"
+              className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">Valor do Projeto (R$)</label>
+              <input
+                type="number"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                placeholder="Ex: 1199"
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+              />
+            </div>
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">Estágio no Pipeline</label>
+              <select
+                value={editStage}
+                onChange={(e) => setEditStage(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+              >
+                {STAGES.map((s) => (
+                  <option key={s.slug} value={s.slug}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">Temperatura</label>
+              <select
+                value={editTemperature}
+                onChange={(e) => setEditTemperature(e.target.value as Temperature)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+              >
+                <option value="quente">🔥 Quente</option>
+                <option value="morno">● Morno</option>
+                <option value="frio">○ Frio</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">Probabilidade (%)</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={editProbability}
+                onChange={(e) => setEditProbability(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[#9BA6A0] mb-1 font-medium">
+              Serviços (separados por vírgula)
+            </label>
+            <input
+              type="text"
+              value={editServices}
+              onChange={(e) => setEditServices(e.target.value)}
+              placeholder="Ex: Site Institucional, Automação WhatsApp"
+              className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+            />
+          </div>
+
+          <div className="flex items-center justify-between pt-4 border-t border-[rgba(218,241,222,0.06)]">
+            {editingOpp && (
+              <button
+                type="button"
+                onClick={() => handleDeleteOpp(editingOpp.id)}
+                className="px-3 py-1.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 text-xs font-medium flex items-center gap-1.5 transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Excluir do Pipeline</span>
+              </button>
+            )}
+            <div className="flex items-center gap-2 ml-auto">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setEditingOpp(null)}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" variant="primary" size="sm">
+                Salvar Alterações
+              </Button>
+            </div>
+          </div>
+        </form>
+      </Modal>
 
       {/* Modal Nova Oportunidade */}
       <Modal
@@ -411,3 +659,4 @@ export default function PipelinePage() {
     </div>
   );
 }
+
