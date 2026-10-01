@@ -41,7 +41,7 @@ export function Sidebar() {
   const sections: NavSection[] = [
     {
       items: [
-        { label: 'Dashboard', href: '/', icon: LayoutDashboard },
+        { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
       ],
     },
     {
@@ -84,7 +84,7 @@ export function Sidebar() {
           isCollapsed ? 'px-3' : 'px-5'
         )}
       >
-        <Link href="/" className="flex items-center overflow-hidden py-1 group" title="EvoPixel OS">
+        <Link href="/dashboard" className="flex items-center overflow-hidden py-1 group" title="EvoPixel OS">
           <Logo isCollapsed={isCollapsed} />
         </Link>
 
@@ -109,7 +109,9 @@ export function Sidebar() {
             {section.items.map((item) => {
               const Icon = item.icon;
               const isActive =
-                item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
+                item.href === '/dashboard'
+                  ? pathname === '/' || pathname.startsWith('/dashboard')
+                  : pathname.startsWith(item.href);
 
               return (
                 <Link
