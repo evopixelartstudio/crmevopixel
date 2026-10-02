@@ -262,6 +262,14 @@ export interface FollowUpItem {
   status: 'pendente' | 'concluido' | 'atrasado';
 }
 
+export type PaymentMethod =
+  | 'pix'
+  | 'mercado_pago_credito_vista'
+  | 'mercado_pago_parcelado'
+  | 'mercado_pago_boleto'
+  | 'transferencia'
+  | 'dinheiro';
+
 export interface FinancialTransaction {
   id: string;
   title: string;
@@ -271,6 +279,11 @@ export interface FinancialTransaction {
   amount_received: number;
   amount_pending: number;
   due_date: string;
+  payment_date?: string;
+  payment_method?: PaymentMethod;
+  gross_amount?: number;
+  fee_amount?: number;
+  net_amount?: number;
   status: 'pago' | 'pendente' | 'parcialmente_pago' | 'atrasado' | 'cancelado';
 }
 

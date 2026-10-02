@@ -51,6 +51,7 @@ import {
   AIFeedback,
   MonthlyClient,
   MonthlyExpense,
+  PaymentMethod,
 } from '@/types/database';
 import { dbService } from '@/lib/supabase/db-service';
 
@@ -1730,7 +1731,10 @@ class CrmService {
     return this.transactions;
   }
 
-  public addFinancialTransaction(txData: Omit<FinancialTransaction, 'id'>): FinancialTransaction {
+  public addFinancialTransaction(
+    txData: Omit<FinancialTransaction, 'id'>,
+    options?: { auto_create_expense?: boolean }
+  ): FinancialTransaction {
     const generatedId =
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
@@ -1742,8 +1746,113 @@ class CrmService {
     this.transactions.unshift(newTx);
     this.saveToLocalStorage('transactions', this.transactions);
     dbService.insertTransaction(newTx);
+
+    // Se houver taxa e a opção de gerar despesa estiver ativada, lança a saída operacional automaticamente
+    if (options?.auto_create_expense && newTx.fee_amount && newTx.fee_amount > 0) {
+      const pMethod = newTx.payment_method || 'Mercado Pago';
+      this.addMonthlyExpense({
+        title: `Taxa Gateway (${pMethod}) — ${newTx.title}`,
+        category: 'Taxas Bancárias / Gateway (Mercado Pago)',
+        amount: Number(newTx.fee_amount) || 0,
+        due_day: new Date(newTx.due_date || new Date()).getDate() || 10,
+        due_date: newTx.due_date || new Date().toISOString().split('T')[0],
+        recurring: false,
+        status: 'pago',
+        notes: `Retenção de taxa de gateway na entrada de ${newTx.client_name}. Bruto: R$ ${newTx.gross_amount || newTx.amount_contracted}, Líquido: R$ ${newTx.net_amount || ((newTx.gross_amount || newTx.amount_contracted) - (newTx.fee_amount || 0))}.`,
+      });
+    }
+
     this.notify();
     return newTx;
+  }
+
+  public settleFinancialTransaction(
+    id: string,
+    settlement: {
+      payment_method: PaymentMethod;
+      gross_amount: number;
+      fee_amount: number;
+      net_amount: number;
+      payment_date?: string;
+      auto_create_expense?: boolean;
+    }
+  ): FinancialTransaction | undefined {
+    const tx = this.transactions.find((t) => t.id === id);
+    if (!tx) return undefined;
+
+    const pDate = settlement.payment_date || new Date().toISOString().split('T')[0];
+    tx.status = 'pago';
+    tx.payment_method = settlement.payment_method;
+    tx.gross_amount = settlement.gross_amount;
+    tx.fee_amount = settlement.fee_amount;
+    tx.net_amount = settlement.net_amount;
+    tx.amount_received = settlement.gross_amount;
+    tx.amount_pending = 0;
+    tx.payment_date = pDate;
+
+    this.saveToLocalStorage('transactions', this.transactions);
+    dbService.updateTransaction(id, tx);
+
+    if (settlement.auto_create_expense && settlement.fee_amount > 0) {
+      this.addMonthlyExpense({
+        title: `Taxa Gateway (${settlement.payment_method}) — ${tx.title}`,
+        category: 'Taxas Bancárias / Gateway (Mercado Pago)',
+        amount: settlement.fee_amount,
+        due_day: new Date(pDate).getDate() || 10,
+        due_date: pDate,
+        recurring: false,
+        status: 'pago',
+        notes: `Retenção automática de gateway na liquidação do cliente ${tx.client_name}. Bruto: R$ ${settlement.gross_amount}, Líquido: R$ ${settlement.net_amount}.`,
+      });
+    }
+
+    this.notify();
+    return tx;
+  }
+
+  public settleHistoricalProject(
+    id: string,
+    settlement: {
+      payment_method: PaymentMethod;
+      gross_amount: number;
+      fee_amount: number;
+      net_amount: number;
+      payment_date?: string;
+      auto_create_expense?: boolean;
+    }
+  ): HistoricalProject | undefined {
+    const proj = this.historicalProjects.find((p) => p.id === id);
+    if (!proj) return undefined;
+
+    const pDate = settlement.payment_date || proj.project_date || new Date().toISOString().split('T')[0];
+    proj.status = 'concluido';
+    proj.amount_contracted = settlement.gross_amount;
+    proj.amount_received = settlement.gross_amount;
+    proj.amount_pending = 0;
+
+    const metaTag = `[GATEWAY:${settlement.payment_method}|GROSS:${settlement.gross_amount}|FEE:${settlement.fee_amount}|NET:${settlement.net_amount}|DATE:${pDate}]`;
+    const cleanDesc = (proj.description || '').replace(/\[GATEWAY:[^\]]+\]/g, '').trim();
+    proj.description = cleanDesc ? `${cleanDesc} ${metaTag}` : metaTag;
+
+    this.saveToLocalStorage('historical_projects', this.historicalProjects);
+    dbService.updateHistoricalProject(id, proj);
+    this.syncClientWithHistoricalProject(proj);
+
+    if (settlement.auto_create_expense && settlement.fee_amount > 0) {
+      this.addMonthlyExpense({
+        title: `Taxa Gateway (${settlement.payment_method}) — ${proj.project_name || proj.company_name}`,
+        category: 'Taxas Bancárias / Gateway (Mercado Pago)',
+        amount: settlement.fee_amount,
+        due_day: new Date(pDate).getDate() || 10,
+        due_date: pDate,
+        recurring: false,
+        status: 'pago',
+        notes: `Retenção automática de gateway na liquidação do projeto ${proj.project_name || proj.company_name}. Bruto: R$ ${settlement.gross_amount}, Líquido: R$ ${settlement.net_amount}.`,
+      });
+    }
+
+    this.notify();
+    return proj;
   }
 
   public updateFinancialTransaction(

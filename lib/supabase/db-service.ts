@@ -996,6 +996,11 @@ export class DatabaseService {
           amount_received: Number(parsed.amount_received) || 0,
           amount_pending: Number(parsed.amount_pending) || 0,
           due_date: parsed.due_date || new Date().toISOString().split('T')[0],
+          payment_date: parsed.payment_date || undefined,
+          payment_method: parsed.payment_method || undefined,
+          gross_amount: parsed.gross_amount !== undefined ? Number(parsed.gross_amount) : Number(parsed.amount_contracted) || 0,
+          fee_amount: parsed.fee_amount !== undefined ? Number(parsed.fee_amount) : 0,
+          net_amount: parsed.net_amount !== undefined ? Number(parsed.net_amount) : (Number(parsed.amount_received) || (Number(parsed.amount_contracted) || 0) - (Number(parsed.fee_amount) || 0)),
           status: parsed.status || 'pendente',
         } as FinancialTransaction;
       });
@@ -1017,6 +1022,11 @@ export class DatabaseService {
         amount_received: Number(tx.amount_received) || 0,
         amount_pending: Number(tx.amount_pending) || 0,
         due_date: tx.due_date,
+        payment_date: tx.payment_date || null,
+        payment_method: tx.payment_method || null,
+        gross_amount: tx.gross_amount !== undefined ? Number(tx.gross_amount) : Number(tx.amount_contracted) || 0,
+        fee_amount: tx.fee_amount !== undefined ? Number(tx.fee_amount) : 0,
+        net_amount: tx.net_amount !== undefined ? Number(tx.net_amount) : (Number(tx.amount_received) || (Number(tx.amount_contracted) || 0) - (Number(tx.fee_amount) || 0)),
         status: tx.status || 'pendente',
         notes: packed.notes,
       };
@@ -1042,6 +1052,11 @@ export class DatabaseService {
       if (data.amount_received !== undefined) payload.amount_received = Number(data.amount_received) || 0;
       if (data.amount_pending !== undefined) payload.amount_pending = Number(data.amount_pending) || 0;
       if (data.due_date !== undefined) payload.due_date = data.due_date;
+      if (data.payment_date !== undefined) payload.payment_date = data.payment_date;
+      if (data.payment_method !== undefined) payload.payment_method = data.payment_method;
+      if (data.gross_amount !== undefined) payload.gross_amount = Number(data.gross_amount) || 0;
+      if (data.fee_amount !== undefined) payload.fee_amount = Number(data.fee_amount) || 0;
+      if (data.net_amount !== undefined) payload.net_amount = Number(data.net_amount) || 0;
       if (data.status !== undefined) payload.status = data.status;
       if (packed.notes !== undefined) payload.notes = packed.notes;
       const { error } = await supabase.from('financial_transactions').update(payload).eq('id', id);

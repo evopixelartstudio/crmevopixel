@@ -259,6 +259,10 @@ CREATE TABLE IF NOT EXISTS financial_transactions (
     amount_pending NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
     due_date DATE NOT NULL,
     payment_date DATE,
+    payment_method TEXT, -- 'pix', 'mercado_pago_credito_vista', 'mercado_pago_parcelado', 'mercado_pago_boleto', 'transferencia', 'dinheiro'
+    gross_amount NUMERIC(10, 2), -- valor contratado/bruto
+    fee_amount NUMERIC(10, 2) DEFAULT 0.00, -- valor da taxa descontada
+    net_amount NUMERIC(10, 2), -- valor líquido recebido na conta
     status TEXT NOT NULL DEFAULT 'pendente', -- 'pendente', 'parcialmente_pago', 'pago', 'atrasado', 'cancelado'
     notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
