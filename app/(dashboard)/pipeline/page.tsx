@@ -675,10 +675,10 @@ export default function PipelinePage() {
                   </span>
                 </div>
 
-                {/* Grid de Cards Lado a Lado dentro da Etapa */}
+                {/* Lista Horizontal de Cards Lado a Lado com Barra de Rolagem Lateral */}
                 <div className="p-4">
                   {stageOpps.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
+                    <div className="flex items-stretch gap-3.5 overflow-x-auto pb-2">
                       {stageOpps.map((opp) => {
                         const leadData = opp.leads;
                         const hasLead = Boolean(leadData);
@@ -693,7 +693,7 @@ export default function PipelinePage() {
                             onDragStart={(e) => {
                               e.dataTransfer.setData('text/plain', opp.id);
                             }}
-                            className="p-3.5 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.22)] cursor-grab active:cursor-grabbing transition-all group shadow-sm flex flex-col justify-between space-y-2.5"
+                            className="w-[270px] sm:w-[285px] shrink-0 p-3.5 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.22)] cursor-grab active:cursor-grabbing transition-all group shadow-sm flex flex-col justify-between space-y-2.5"
                           >
                             <div>
                               <div className="flex items-start justify-between gap-1.5 mb-1">
