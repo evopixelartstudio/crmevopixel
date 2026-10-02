@@ -326,10 +326,14 @@ export default function ClientesPage() {
                         <button
                           type="button"
                           onClick={() => handleDirectWhatsApp(clientPhone, client.company_name, client)}
-                          className="p-1.5 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 border border-[#25D366]/30 text-[#25D366] transition-all active:scale-95 shadow-sm flex items-center justify-center"
+                          className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
+                            clientPhone
+                              ? 'bg-[#10201E] hover:bg-[#163832] border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8]'
+                              : 'bg-[#10201E]/60 hover:bg-[#10201E] border-[rgba(218,241,222,0.06)] text-[#65706A] hover:text-[#9BA6A0]'
+                          }`}
                           title={clientPhone ? `Chamar ${client.company_name} no WhatsApp` : 'Adicionar WhatsApp'}
                         >
-                          <WhatsAppIcon className="w-4 h-4 fill-current" />
+                          <WhatsAppIcon className="w-3.5 h-3.5 fill-current" />
                         </button>
 
                         {/* Botão Instagram */}
@@ -338,8 +342,8 @@ export default function ClientesPage() {
                           onClick={() => handleDirectInstagram(clientInstagram, client.company_name, client)}
                           className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
                             clientInstagram
-                              ? 'bg-pink-500/15 hover:bg-pink-500/25 border-pink-500/30 text-pink-400'
-                              : 'bg-[#10201E] hover:bg-pink-500/15 border-[rgba(218,241,222,0.1)] text-[#9BA6A0] hover:text-pink-400'
+                              ? 'bg-[#10201E] hover:bg-[#163832] border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8]'
+                              : 'bg-[#10201E]/60 hover:bg-[#10201E] border-[rgba(218,241,222,0.06)] text-[#65706A] hover:text-[#9BA6A0]'
                           }`}
                           title={
                             clientInstagram
@@ -362,8 +366,8 @@ export default function ClientesPage() {
                           }
                           className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
                             clientGoogleBusiness
-                              ? 'bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/30 text-blue-400'
-                              : 'bg-[#10201E] hover:bg-blue-500/15 border-[rgba(218,241,222,0.1)] text-[#9BA6A0] hover:text-blue-400'
+                              ? 'bg-[#10201E] hover:bg-[#163832] border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8]'
+                              : 'bg-[#10201E]/60 hover:bg-[#10201E] border-[rgba(218,241,222,0.06)] text-[#65706A] hover:text-[#9BA6A0]'
                           }`}
                           title={
                             clientGoogleBusiness

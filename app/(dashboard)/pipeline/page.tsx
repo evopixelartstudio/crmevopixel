@@ -611,9 +611,9 @@ export default function PipelinePage() {
         </div>
       ) : null}
 
-      {/* MODO KANBAN (Colunas baseadas em public.pipeline_stages ordenadas por display_order ASC) */}
+      {/* MODO KANBAN EM LISTA VERTICAL DE ETAPAS (Caixas uma em cima da outra, com cards lado a lado) */}
       {viewMode === 'kanban' && stages.length > 0 && (
-        <div className="flex gap-4 overflow-x-auto pb-6 pt-1">
+        <div className="flex flex-col space-y-5 pb-6 pt-1">
           {stages.map((stage, stageIndex) => {
             const stageOpps = opportunities.filter((o) => o.stage_id === stage.id);
             const stageTotal = stageOpps.reduce(
@@ -644,21 +644,21 @@ export default function PipelinePage() {
                     handleStageChange(oppId, stage.id);
                   }
                 }}
-                className={`w-72 shrink-0 flex flex-col rounded-2xl bg-[#0C1A19]/80 border transition-all overflow-hidden ${
+                className={`w-full flex flex-col rounded-2xl bg-[#0C1A19]/80 border transition-all overflow-hidden ${
                   isDragTarget
                     ? 'border-[#F1F9A1] bg-[#10201E]/60'
-                    : 'border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.18)]'
+                    : 'border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.16)]'
                 }`}
               >
-                {/* Header da Coluna com cor da etapa */}
+                {/* Header da Etapa */}
                 <div
-                  className="p-3.5 border-b border-[rgba(218,241,222,0.06)] bg-[#07100F]/60 flex items-center justify-between"
+                  className="px-4 py-3 border-b border-[rgba(218,241,222,0.06)] bg-[#07100F]/60 flex items-center justify-between"
                   style={{
-                    borderTopWidth: '3px',
-                    borderTopColor: stage.color || '#8EB69B',
+                    borderLeftWidth: '3px',
+                    borderLeftColor: stage.color || '#8EB69B',
                   }}
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2.5">
                     <span
                       className="w-2.5 h-2.5 rounded-full shrink-0"
                       style={{ backgroundColor: stage.color || '#8EB69B' }}
@@ -666,211 +666,213 @@ export default function PipelinePage() {
                     <span className="text-xs font-semibold text-[#E7ECE8] font-heading">
                       {stage.name}
                     </span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#10201E] text-[#9BA6A0]">
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#10201E] text-[#9BA6A0]">
                       {stageOpps.length}
                     </span>
                   </div>
-                  <span className="text-[11px] font-mono text-[#8EB69B]">
+                  <span className="text-xs font-mono text-[#8EB69B]">
                     R$ {stageTotal.toLocaleString('pt-BR')}
                   </span>
                 </div>
 
-                {/* Lista de Cards da Coluna */}
-                <div className="p-3 space-y-3 flex-1 overflow-y-auto max-h-[68vh] min-h-[160px]">
-                  {stageOpps.map((opp) => {
-                    const leadData = opp.leads;
-                    const hasLead = Boolean(leadData);
-                    const hasPhone = Boolean(leadData?.whatsapp || leadData?.phone);
-                    const hasInstagram = Boolean(leadData?.instagram);
-                    const hasMaps = Boolean(leadData?.google_business);
+                {/* Grid de Cards Lado a Lado dentro da Etapa */}
+                <div className="p-4">
+                  {stageOpps.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
+                      {stageOpps.map((opp) => {
+                        const leadData = opp.leads;
+                        const hasLead = Boolean(leadData);
+                        const hasPhone = Boolean(leadData?.whatsapp || leadData?.phone);
+                        const hasInstagram = Boolean(leadData?.instagram);
+                        const hasMaps = Boolean(leadData?.google_business);
 
-                    return (
-                      <div
-                        key={opp.id}
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('text/plain', opp.id);
-                        }}
-                        className="p-3.5 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.22)] cursor-grab active:cursor-grabbing transition-all group shadow-sm flex flex-col justify-between space-y-2.5"
-                      >
-                        <div>
-                          <div className="flex items-start justify-between gap-1.5 mb-1">
-                            <span className="text-xs font-semibold text-[#E7ECE8] font-heading leading-snug">
-                              {opp.title}
-                            </span>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <button
-                                type="button"
-                                onClick={(e) => handleOpenEditModal(opp, e)}
-                                className="p-1 rounded hover:bg-[#07100F] text-[#9BA6A0] hover:text-[#F1F9A1] transition-colors"
-                                title="Editar oportunidade"
-                              >
-                                <Pencil className="w-3 h-3" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setDeletingOppId(deletingOppId === opp.id ? null : opp.id);
-                                }}
-                                className="p-1 rounded hover:bg-[#07100F] text-[#9BA6A0] hover:text-red-400 transition-colors"
-                                title="Excluir oportunidade"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Dados vinculados do Lead (LEFT JOIN seguro mesmo com company_id/lead_id NULL) */}
-                          <div className="space-y-0.5 mt-1">
-                            {hasLead ? (
-                              <>
-                                <div className="flex items-center gap-1 text-[11px] text-[#8EB69B]">
-                                  <Building2 className="w-3 h-3 shrink-0" />
-                                  <span className="truncate">
-                                    {leadData?.company_name || leadData?.name}
-                                  </span>
+                        return (
+                          <div
+                            key={opp.id}
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.setData('text/plain', opp.id);
+                            }}
+                            className="p-3.5 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.22)] cursor-grab active:cursor-grabbing transition-all group shadow-sm flex flex-col justify-between space-y-2.5"
+                          >
+                            <div>
+                              <div className="flex items-start justify-between gap-1.5 mb-1">
+                                <span className="text-xs font-semibold text-[#E7ECE8] font-heading leading-snug">
+                                  {opp.title}
+                                </span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleOpenEditModal(opp, e)}
+                                    className="p-1 rounded hover:bg-[#07100F] text-[#9BA6A0] hover:text-[#F1F9A1] transition-colors"
+                                    title="Editar oportunidade"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setDeletingOppId(deletingOppId === opp.id ? null : opp.id);
+                                    }}
+                                    className="p-1 rounded hover:bg-[#07100F] text-[#9BA6A0] hover:text-red-400 transition-colors"
+                                    title="Excluir oportunidade"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
                                 </div>
-                                {leadData?.name && (
-                                  <div className="flex items-center gap-1 text-[10px] text-[#9BA6A0]">
-                                    <User className="w-3 h-3 shrink-0" />
-                                    <span className="truncate">{leadData.name}</span>
+                              </div>
+
+                              {/* Dados vinculados do Lead (LEFT JOIN seguro mesmo com company_id/lead_id NULL) */}
+                              <div className="space-y-0.5 mt-1">
+                                {hasLead ? (
+                                  <>
+                                    <div className="flex items-center gap-1 text-[11px] text-[#8EB69B]">
+                                      <Building2 className="w-3 h-3 shrink-0" />
+                                      <span className="truncate">
+                                        {leadData?.company_name || leadData?.name}
+                                      </span>
+                                    </div>
+                                    {leadData?.name && (
+                                      <div className="flex items-center gap-1 text-[10px] text-[#9BA6A0]">
+                                        <User className="w-3 h-3 shrink-0" />
+                                        <span className="truncate">{leadData.name}</span>
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <div className="text-[10px] text-[#65706A] italic">
+                                    Sem lead vinculado
                                   </div>
                                 )}
-                              </>
-                            ) : (
-                              <div className="text-[10px] text-[#65706A] italic">
-                                Sem lead vinculado
                               </div>
-                            )}
-                          </div>
 
-                          {/* 3 Botões Rápidos no Card: WhatsApp, Instagram e Google Maps */}
-                          <div className="flex items-center gap-1.5 mt-2.5 pt-2 border-t border-[rgba(218,241,222,0.04)]">
-                            {/* Botão WhatsApp */}
-                            <button
-                              type="button"
-                              onClick={(e) => handleOppWhatsApp(opp, e)}
-                              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
-                                hasPhone
-                                  ? 'bg-[#25D366]/15 hover:bg-[#25D366]/25 border-[#25D366]/30 text-[#25D366]'
-                                  : 'bg-[#07100F]/60 hover:bg-[#25D366]/15 border-[rgba(218,241,222,0.08)] text-[#65706A] hover:text-[#25D366]'
-                              }`}
-                              title={
-                                hasPhone
-                                  ? `Chamar no WhatsApp (${leadData?.whatsapp || leadData?.phone})`
-                                  : 'Cadastrar ou chamar no WhatsApp'
-                              }
-                            >
-                              <WhatsAppIcon className="w-3.5 h-3.5 fill-current" />
-                            </button>
+                              {/* 3 Botões Rápidos no Card com Coloração Discreta: WhatsApp, Instagram e Google Maps */}
+                              <div className="flex items-center gap-1.5 mt-2.5 pt-2 border-t border-[rgba(218,241,222,0.04)]">
+                                {/* Botão WhatsApp */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleOppWhatsApp(opp, e)}
+                                  className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
+                                    hasPhone
+                                      ? 'bg-[#07100F]/70 hover:bg-[#163832] border-[rgba(218,241,222,0.1)] hover:border-[rgba(218,241,222,0.22)] text-[#8EB69B] hover:text-[#E7ECE8]'
+                                      : 'bg-[#07100F]/40 hover:bg-[#07100F]/80 border-[rgba(218,241,222,0.05)] text-[#65706A] hover:text-[#9BA6A0]'
+                                  }`}
+                                  title={
+                                    hasPhone
+                                      ? `Chamar no WhatsApp (${leadData?.whatsapp || leadData?.phone})`
+                                      : 'Cadastrar ou chamar no WhatsApp'
+                                  }
+                                >
+                                  <WhatsAppIcon className="w-3.5 h-3.5 fill-current" />
+                                </button>
 
-                            {/* Botão Instagram */}
-                            <button
-                              type="button"
-                              onClick={(e) => handleOppInstagram(opp, e)}
-                              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
-                                hasInstagram
-                                  ? 'bg-pink-500/15 hover:bg-pink-500/25 border-pink-500/30 text-pink-400'
-                                  : 'bg-[#07100F]/60 hover:bg-pink-500/15 border-[rgba(218,241,222,0.08)] text-[#65706A] hover:text-pink-400'
-                              }`}
-                              title={
-                                hasInstagram
-                                  ? `Abrir Instagram (${leadData?.instagram})`
-                                  : 'Cadastrar ou abrir Instagram'
-                              }
-                            >
-                              <Instagram className="w-3.5 h-3.5" />
-                            </button>
+                                {/* Botão Instagram */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleOppInstagram(opp, e)}
+                                  className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
+                                    hasInstagram
+                                      ? 'bg-[#07100F]/70 hover:bg-[#163832] border-[rgba(218,241,222,0.1)] hover:border-[rgba(218,241,222,0.22)] text-[#8EB69B] hover:text-[#E7ECE8]'
+                                      : 'bg-[#07100F]/40 hover:bg-[#07100F]/80 border-[rgba(218,241,222,0.05)] text-[#65706A] hover:text-[#9BA6A0]'
+                                  }`}
+                                  title={
+                                    hasInstagram
+                                      ? `Abrir Instagram (${leadData?.instagram})`
+                                      : 'Cadastrar ou abrir Instagram'
+                                  }
+                                >
+                                  <Instagram className="w-3.5 h-3.5" />
+                                </button>
 
-                            {/* Botão Google Maps / Google Meu Negócio */}
-                            <button
-                              type="button"
-                              onClick={(e) => handleOppMaps(opp, e)}
-                              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
-                                hasMaps
-                                  ? 'bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/30 text-blue-400'
-                                  : 'bg-[#07100F]/60 hover:bg-blue-500/15 border-[rgba(218,241,222,0.08)] text-[#65706A] hover:text-blue-400'
-                              }`}
-                              title={
-                                hasMaps
-                                  ? `Abrir Google Meu Negócio / Maps (${leadData?.google_business})`
-                                  : `Buscar ${opp.title} no Google Maps`
-                              }
-                            >
-                              <MapPin className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                                {/* Botão Google Maps / Google Meu Negócio */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleOppMaps(opp, e)}
+                                  className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
+                                    hasMaps
+                                      ? 'bg-[#07100F]/70 hover:bg-[#163832] border-[rgba(218,241,222,0.1)] hover:border-[rgba(218,241,222,0.22)] text-[#8EB69B] hover:text-[#E7ECE8]'
+                                      : 'bg-[#07100F]/40 hover:bg-[#07100F]/80 border-[rgba(218,241,222,0.05)] text-[#65706A] hover:text-[#9BA6A0]'
+                                  }`}
+                                  title={
+                                    hasMaps
+                                      ? `Abrir Google Meu Negócio / Maps (${leadData?.google_business})`
+                                      : `Buscar ${opp.title} no Google Maps`
+                                  }
+                                >
+                                  <MapPin className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
 
-                          {/* Confirmação rápida de exclusão */}
-                          {deletingOppId === opp.id && (
-                            <div className="mt-2 p-2 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center justify-between gap-2">
-                              <span className="text-[10px] text-red-300 font-medium">
-                                Excluir do Supabase?
-                              </span>
+                              {/* Confirmação rápida de exclusão */}
+                              {deletingOppId === opp.id && (
+                                <div className="mt-2 p-2 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center justify-between gap-2">
+                                  <span className="text-[10px] text-red-300 font-medium">
+                                    Excluir do Supabase?
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleDeleteOpp(opp.id, e)}
+                                      className="px-2 py-0.5 rounded bg-red-500 text-[#07100F] text-[10px] font-semibold hover:bg-red-400"
+                                    >
+                                      Sim
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setDeletingOppId(null);
+                                      }}
+                                      className="px-2 py-0.5 rounded bg-[#07100F] text-[#9BA6A0] text-[10px] hover:text-[#E7ECE8]"
+                                    >
+                                      Não
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="pt-2 border-t border-[rgba(218,241,222,0.05)] flex items-center justify-between">
+                              <div>
+                                <span className="text-[10px] text-[#65706A] block">Valor Estimado</span>
+                                <span className="text-xs font-semibold text-[#F1F9A1] font-mono">
+                                  R$ {(Number(opp.estimated_value) || 0).toLocaleString('pt-BR')}
+                                </span>
+                              </div>
+
                               <div className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleDeleteOpp(opp.id, e)}
-                                  className="px-2 py-0.5 rounded bg-red-500 text-[#07100F] text-[10px] font-semibold hover:bg-red-400"
-                                >
-                                  Sim
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setDeletingOppId(null);
-                                  }}
-                                  className="px-2 py-0.5 rounded bg-[#07100F] text-[#9BA6A0] text-[10px] hover:text-[#E7ECE8]"
-                                >
-                                  Não
-                                </button>
+                                <span className="text-[10px] font-mono text-[#9BA6A0] mr-1">
+                                  {opp.probability ?? 0}%
+                                </span>
+                                {stageIndex > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => moveStageDirection(opp, 'prev')}
+                                    className="p-1 rounded hover:bg-[#07100F] text-[#9BA6A0] hover:text-[#E7ECE8]"
+                                    title="Etapa anterior"
+                                  >
+                                    <ArrowLeft className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                {stageIndex < stages.length - 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => moveStageDirection(opp, 'next')}
+                                    className="p-1 rounded hover:bg-[#07100F] text-[#9BA6A0] hover:text-[#F1F9A1]"
+                                    title="Próxima etapa"
+                                  >
+                                    <ArrowRight className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
                             </div>
-                          )}
-                        </div>
-
-                        <div className="pt-2 border-t border-[rgba(218,241,222,0.05)] flex items-center justify-between">
-                          <div>
-                            <span className="text-[10px] text-[#65706A] block">Valor Estimado</span>
-                            <span className="text-xs font-semibold text-[#F1F9A1] font-mono">
-                              R$ {(Number(opp.estimated_value) || 0).toLocaleString('pt-BR')}
-                            </span>
                           </div>
-
-                          <div className="flex items-center gap-1">
-                            <span className="text-[10px] font-mono text-[#9BA6A0] mr-1">
-                              {opp.probability ?? 0}%
-                            </span>
-                            {stageIndex > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => moveStageDirection(opp, 'prev')}
-                                className="p-1 rounded hover:bg-[#07100F] text-[#9BA6A0] hover:text-[#E7ECE8]"
-                                title="Etapa anterior"
-                              >
-                                <ArrowLeft className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                            {stageIndex < stages.length - 1 && (
-                              <button
-                                type="button"
-                                onClick={() => moveStageDirection(opp, 'next')}
-                                className="p-1 rounded hover:bg-[#07100F] text-[#9BA6A0] hover:text-[#F1F9A1]"
-                                title="Próxima etapa"
-                              >
-                                <ArrowRight className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {stageOpps.length === 0 && (
-                    <div className="h-28 rounded-xl border border-dashed border-[rgba(218,241,222,0.06)] flex items-center justify-center text-[11px] text-[#65706A] text-center px-3">
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="h-20 rounded-xl border border-dashed border-[rgba(218,241,222,0.06)] flex items-center justify-center text-[11px] text-[#65706A] text-center px-3">
                       Arraste um card para {stage.name}
                     </div>
                   )}
@@ -1031,8 +1033,8 @@ export default function PipelinePage() {
                                 onClick={(e) => handleOppWhatsApp(opp, e)}
                                 className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
                                   hasPhone
-                                    ? 'bg-[#25D366]/15 hover:bg-[#25D366]/25 border-[#25D366]/30 text-[#25D366]'
-                                    : 'bg-[#10201E] hover:bg-[#25D366]/15 border-[rgba(218,241,222,0.1)] text-[#9BA6A0] hover:text-[#25D366]'
+                                    ? 'bg-[#10201E] hover:bg-[#163832] border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8]'
+                                    : 'bg-[#10201E]/60 hover:bg-[#10201E] border-[rgba(218,241,222,0.06)] text-[#65706A] hover:text-[#9BA6A0]'
                                 }`}
                                 title={
                                   hasPhone
@@ -1040,7 +1042,7 @@ export default function PipelinePage() {
                                     : 'Cadastrar ou chamar no WhatsApp'
                                 }
                               >
-                                <WhatsAppIcon className="w-4 h-4 fill-current" />
+                                <WhatsAppIcon className="w-3.5 h-3.5 fill-current" />
                               </button>
 
                               {/* Botão Instagram */}
@@ -1049,8 +1051,8 @@ export default function PipelinePage() {
                                 onClick={(e) => handleOppInstagram(opp, e)}
                                 className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
                                   hasInstagram
-                                    ? 'bg-pink-500/15 hover:bg-pink-500/25 border-pink-500/30 text-pink-400'
-                                    : 'bg-[#10201E] hover:bg-pink-500/15 border-[rgba(218,241,222,0.1)] text-[#9BA6A0] hover:text-pink-400'
+                                    ? 'bg-[#10201E] hover:bg-[#163832] border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8]'
+                                    : 'bg-[#10201E]/60 hover:bg-[#10201E] border-[rgba(218,241,222,0.06)] text-[#65706A] hover:text-[#9BA6A0]'
                                 }`}
                                 title={
                                   hasInstagram
@@ -1067,8 +1069,8 @@ export default function PipelinePage() {
                                 onClick={(e) => handleOppMaps(opp, e)}
                                 className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
                                   hasMaps
-                                    ? 'bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/30 text-blue-400'
-                                    : 'bg-[#10201E] hover:bg-blue-500/15 border-[rgba(218,241,222,0.1)] text-[#9BA6A0] hover:text-blue-400'
+                                    ? 'bg-[#10201E] hover:bg-[#163832] border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8]'
+                                    : 'bg-[#10201E]/60 hover:bg-[#10201E] border-[rgba(218,241,222,0.06)] text-[#65706A] hover:text-[#9BA6A0]'
                                 }`}
                                 title={
                                   hasMaps
