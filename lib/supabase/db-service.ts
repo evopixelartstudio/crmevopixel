@@ -444,6 +444,8 @@ export class DatabaseService {
           estimated_value: Number(row.estimated_value) || 0,
           probability: Number(row.probability) || 0,
           status: row.status || 'aberta',
+          loss_reason: row.loss_reason || null,
+          closed_at: row.closed_at || null,
           stage_slug: matchedStage?.slug || row.stage_slug || 'primeiro_contato',
           lead_name: parsedLead?.name || row.lead_name || 'Contato Principal',
           company_name: parsedLead?.company_name || row.company_name || row.title || 'Cliente',

@@ -128,6 +128,8 @@ export interface Opportunity {
   estimated_value: number;
   probability: number;
   status?: string;
+  loss_reason?: string | null;
+  closed_at?: string | null;
   score: number;
   temperature: Temperature;
   priority: Priority;
