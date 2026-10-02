@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { crmService } from '@/lib/services/crm-service';
-import { FinancialTransaction, MonthlyExpense } from '@/types/database';
+import { FinancialTransaction, HistoricalProject, MonthlyExpense } from '@/types/database';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
@@ -11,22 +11,109 @@ import {
   DollarSign,
   Plus,
   TrendingDown,
+  TrendingUp,
   Wallet,
-  CheckCircle2,
   Trash2,
   Pencil,
   Repeat,
+  Calendar,
+  ArrowUpRight,
+  ArrowDownRight,
+  Filter,
 } from 'lucide-react';
+
+const MONTH_NAMES = [
+  { index: 0, short: 'Jan', full: 'Janeiro' },
+  { index: 1, short: 'Fev', full: 'Fevereiro' },
+  { index: 2, short: 'Mar', full: 'Março' },
+  { index: 3, short: 'Abr', full: 'Abril' },
+  { index: 4, short: 'Mai', full: 'Maio' },
+  { index: 5, short: 'Jun', full: 'Junho' },
+  { index: 6, short: 'Jul', full: 'Julho' },
+  { index: 7, short: 'Ago', full: 'Agosto' },
+  { index: 8, short: 'Set', full: 'Setembro' },
+  { index: 9, short: 'Out', full: 'Outubro' },
+  { index: 10, short: 'Nov', full: 'Novembro' },
+  { index: 11, short: 'Dez', full: 'Dezembro' },
+];
+
+interface UnifiedIncomeItem {
+  id: string;
+  source: 'transaction' | 'history';
+  title: string;
+  client_name: string;
+  category: string;
+  amount_contracted: number;
+  amount_received: number;
+  amount_pending: number;
+  date: string; // YYYY-MM-DD
+  year: number;
+  month: number; // 0-11
+  monthKey: string; // YYYY-MM
+  status: 'pago' | 'pendente' | 'parcialmente_pago' | 'atrasado' | 'cancelado';
+}
+
+function parseDateSafe(dateStr?: string): { year: number; month: number; monthKey: string; formatted: string } {
+  const now = new Date();
+  if (!dateStr) {
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    return {
+      year: y,
+      month: m,
+      monthKey: `${y}-${String(m + 1).padStart(2, '0')}`,
+      formatted: now.toLocaleDateString('pt-BR'),
+    };
+  }
+  // Evita problemas de fuso horário em strings YYYY-MM-DD
+  const parts = dateStr.split('T')[0].split('-');
+  if (parts.length === 3) {
+    const y = Number(parts[0]) || now.getFullYear();
+    const m = (Number(parts[1]) || 1) - 1;
+    const d = Number(parts[2]) || 1;
+    return {
+      year: y,
+      month: Math.min(11, Math.max(0, m)),
+      monthKey: `${y}-${String(m + 1).padStart(2, '0')}`,
+      formatted: `${String(d).padStart(2, '0')}/${String(m + 1).padStart(2, '0')}/${y}`,
+    };
+  }
+  const dObj = new Date(dateStr);
+  if (isNaN(dObj.getTime())) {
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    return {
+      year: y,
+      month: m,
+      monthKey: `${y}-${String(m + 1).padStart(2, '0')}`,
+      formatted: dateStr,
+    };
+  }
+  const y = dObj.getFullYear();
+  const m = dObj.getMonth();
+  return {
+    year: y,
+    month: m,
+    monthKey: `${y}-${String(m + 1).padStart(2, '0')}`,
+    formatted: dObj.toLocaleDateString('pt-BR'),
+  };
+}
 
 export default function FinanceiroPage() {
   const [transactions, setTransactions] = useState<FinancialTransaction[]>(() => [
     ...crmService.getFinancialTransactions(),
   ]);
+  const [historicalProjects, setHistoricalProjects] = useState<HistoricalProject[]>(() => [
+    ...crmService.getHistoricalProjects(),
+  ]);
   const [expenses, setExpenses] = useState<MonthlyExpense[]>(() => [
     ...crmService.getMonthlyExpenses(),
   ]);
-  const [summary, setSummary] = useState(() => crmService.getFinancialSummary());
 
+  // Filtros de Período e Status
+  const currentYearStr = String(new Date().getFullYear());
+  const [selectedYear, setSelectedYear] = useState<string>('todos');
+  const [selectedMonth, setSelectedMonth] = useState<number | 'todos'>('todos');
   const [filterStatus, setFilterStatus] = useState<string>('todos');
 
   // Modal State - Receita / Lançamento
@@ -38,21 +125,22 @@ export default function FinanceiroPage() {
   const [fStatus, setFStatus] = useState<'pago' | 'pendente'>('pago');
   const [fDueDate, setFDueDate] = useState(() => new Date().toISOString().split('T')[0]);
 
-  // Modal State - Gasto Mensal
+  // Modal State - Gasto Mensal (Saída)
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [eTitle, setETitle] = useState('');
   const [eCategory, setECategory] = useState('Ferramentas & SaaS');
   const [eAmount, setEAmount] = useState('');
   const [eDueDay, setEDueDay] = useState('10');
+  const [eDueDate, setEDueDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [eRecurring, setERecurring] = useState(true);
   const [eStatus, setEStatus] = useState<'pago' | 'pendente'>('pendente');
   const [eNotes, setENotes] = useState('');
 
   const refreshData = () => {
     setTransactions([...crmService.getFinancialTransactions()]);
+    setHistoricalProjects([...crmService.getHistoricalProjects()]);
     setExpenses([...crmService.getMonthlyExpenses()]);
-    setSummary(crmService.getFinancialSummary());
   };
 
   useEffect(() => {
@@ -62,6 +150,229 @@ export default function FinanceiroPage() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Unificar Entradas (Transações Financeiras + Histórico de Projetos sem duplicar)
+  const unifiedIncomes = useMemo<UnifiedIncomeItem[]>(() => {
+    const norm = (v: unknown) => String(v ?? '').trim().toLowerCase();
+    const list: UnifiedIncomeItem[] = [];
+
+    // 1. Projetos do Histórico
+    historicalProjects.forEach((hp) => {
+      const parsed = parseDateSafe(hp.project_date);
+      const isPaid =
+        hp.status === 'concluido' ||
+        hp.status === 'liquidado' ||
+        (hp.amount_received > 0 && hp.amount_pending === 0);
+      list.push({
+        id: hp.id,
+        source: 'history',
+        title: hp.services_summary || `Projeto - ${hp.company_name}`,
+        client_name: hp.company_name || hp.client_name || 'Cliente',
+        category: hp.segment || 'Projeto Fechado',
+        amount_contracted: Number(hp.amount_contracted) || 0,
+        amount_received: Number(hp.amount_received) || 0,
+        amount_pending: Number(hp.amount_pending) || 0,
+        date: hp.project_date,
+        year: parsed.year,
+        month: parsed.month,
+        monthKey: parsed.monthKey,
+        status: isPaid ? 'pago' : hp.amount_received > 0 ? 'parcialmente_pago' : 'pendente',
+      });
+    });
+
+    // 2. Transações Financeiras (ignorando duplicatas exatas do histórico)
+    transactions.forEach((t) => {
+      const isDup = historicalProjects.some(
+        (hp) =>
+          norm(hp.company_name) === norm(t.client_name) &&
+          Number(hp.amount_contracted) === Number(t.amount_contracted) &&
+          hp.project_date === t.due_date
+      );
+      if (!isDup) {
+        const parsed = parseDateSafe(t.due_date);
+        list.push({
+          id: t.id,
+          source: 'transaction',
+          title: t.title,
+          client_name: t.client_name,
+          category: t.category || 'Projeto',
+          amount_contracted: Number(t.amount_contracted) || 0,
+          amount_received: t.status === 'pago' ? Number(t.amount_received || t.amount_contracted) || 0 : Number(t.amount_received) || 0,
+          amount_pending: t.status === 'pago' ? 0 : Number(t.amount_pending || t.amount_contracted) || 0,
+          date: t.due_date,
+          year: parsed.year,
+          month: parsed.month,
+          monthKey: parsed.monthKey,
+          status: t.status,
+        });
+      }
+    });
+
+    return list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [transactions, historicalProjects]);
+
+  // Anos disponíveis para filtro
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set<string>([currentYearStr]);
+    unifiedIncomes.forEach((item) => yearsSet.add(String(item.year)));
+    expenses.forEach((exp) => {
+      if (exp.due_date) {
+        yearsSet.add(String(parseDateSafe(exp.due_date).year));
+      }
+    });
+    return Array.from(yearsSet).sort((a, b) => Number(b) - Number(a));
+  }, [unifiedIncomes, expenses, currentYearStr]);
+
+  // Verifica se uma saída (gasto) pertence a determinado (ano, mês)
+  const expenseAppliesToMonth = (exp: MonthlyExpense, year: number, month: number) => {
+    if (exp.recurring) return true;
+    if (!exp.due_date) {
+      const now = new Date();
+      return year === now.getFullYear() && month === now.getMonth();
+    }
+    const parsed = parseDateSafe(exp.due_date);
+    return parsed.year === year && parsed.month === month;
+  };
+
+  // Resumo Mensal (Entradas vs Saídas por Mês)
+  const monthlyBreakdown = useMemo(() => {
+    const monthKeysSet = new Set<string>();
+    const now = new Date();
+    const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    monthKeysSet.add(currentKey);
+
+    unifiedIncomes.forEach((inc) => {
+      if (selectedYear === 'todos' || String(inc.year) === selectedYear) {
+        monthKeysSet.add(inc.monthKey);
+      }
+    });
+
+    expenses.forEach((exp) => {
+      if (exp.due_date) {
+        const parsed = parseDateSafe(exp.due_date);
+        if (selectedYear === 'todos' || String(parsed.year) === selectedYear) {
+          monthKeysSet.add(parsed.monthKey);
+        }
+      }
+    });
+
+    // Se um ano específico foi selecionado, garantir que os meses com movimentação ou o mês atual daquele ano apareçam
+    if (selectedYear !== 'todos') {
+      MONTH_NAMES.forEach((m) => {
+        const key = `${selectedYear}-${String(m.index + 1).padStart(2, '0')}`;
+        const hasInc = unifiedIncomes.some((i) => i.monthKey === key);
+        const hasExp = expenses.some(
+          (e) => !e.recurring && e.due_date && parseDateSafe(e.due_date).monthKey === key
+        );
+        if (hasInc || hasExp || (selectedYear === currentYearStr && m.index <= now.getMonth())) {
+          monthKeysSet.add(key);
+        }
+      });
+    }
+
+    const sortedKeys = Array.from(monthKeysSet)
+      .filter((k) => (selectedYear === 'todos' ? true : k.startsWith(`${selectedYear}-`)))
+      .sort((a, b) => b.localeCompare(a));
+
+    return sortedKeys.map((mKey) => {
+      const [yStr, mStr] = mKey.split('-');
+      const yearNum = Number(yStr);
+      const monthIdx = Number(mStr) - 1;
+      const monthInfo = MONTH_NAMES[monthIdx] || MONTH_NAMES[0];
+
+      const monthIncomes = unifiedIncomes.filter(
+        (inc) => inc.year === yearNum && inc.month === monthIdx
+      );
+      const entradasContratadas = monthIncomes.reduce((acc, i) => acc + i.amount_contracted, 0);
+      const entradasRecebidas = monthIncomes.reduce((acc, i) => acc + i.amount_received, 0);
+      const entradasPendentes = monthIncomes.reduce((acc, i) => acc + i.amount_pending, 0);
+
+      const monthExpenses = expenses.filter((exp) =>
+        expenseAppliesToMonth(exp, yearNum, monthIdx)
+      );
+      const saidasTotal = monthExpenses.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+      const saidasPagas = monthExpenses
+        .filter((e) => e.status === 'pago')
+        .reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+      const saidasPendentes = monthExpenses
+        .filter((e) => e.status !== 'pago')
+        .reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+
+      const saldoMes = entradasRecebidas - saidasTotal;
+
+      return {
+        monthKey: mKey,
+        year: yearNum,
+        month: monthIdx,
+        label: `${monthInfo.full} ${yearNum}`,
+        shortLabel: `${monthInfo.short}/${String(yearNum).slice(-2)}`,
+        incomesCount: monthIncomes.length,
+        expensesCount: monthExpenses.length,
+        entradasContratadas,
+        entradasRecebidas,
+        entradasPendentes,
+        saidasTotal,
+        saidasPagas,
+        saidasPendentes,
+        saldoMes,
+      };
+    });
+  }, [unifiedIncomes, expenses, selectedYear, currentYearStr]);
+
+  // Entradas filtradas pelo Mês/Ano/Status selecionados
+  const filteredIncomes = useMemo(() => {
+    return unifiedIncomes.filter((item) => {
+      if (selectedYear !== 'todos' && String(item.year) !== selectedYear) return false;
+      if (selectedMonth !== 'todos' && item.month !== selectedMonth) return false;
+      if (filterStatus !== 'todos' && item.status !== filterStatus) return false;
+      return true;
+    });
+  }, [unifiedIncomes, selectedYear, selectedMonth, filterStatus]);
+
+  // Saídas filtradas pelo Mês/Ano selecionados
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter((exp) => {
+      if (exp.recurring) return true;
+      if (!exp.due_date) return true;
+      const parsed = parseDateSafe(exp.due_date);
+      if (selectedYear !== 'todos' && String(parsed.year) !== selectedYear) return false;
+      if (selectedMonth !== 'todos' && parsed.month !== selectedMonth) return false;
+      return true;
+    });
+  }, [expenses, selectedYear, selectedMonth]);
+
+  // KPIs dinâmicos do topo (respeitam o mês/ano selecionado)
+  const kpiMetrics = useMemo(() => {
+    const periodIncomes = unifiedIncomes.filter((item) => {
+      if (selectedYear !== 'todos' && String(item.year) !== selectedYear) return false;
+      if (selectedMonth !== 'todos' && item.month !== selectedMonth) return false;
+      return true;
+    });
+
+    const contratado = periodIncomes.reduce((acc, i) => acc + i.amount_contracted, 0);
+    const recebido = periodIncomes.reduce((acc, i) => acc + i.amount_received, 0);
+    const pendente = periodIncomes.reduce((acc, i) => acc + i.amount_pending, 0);
+
+    const gastosMensais = filteredExpenses.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+    const gastosPagos = filteredExpenses
+      .filter((e) => e.status === 'pago')
+      .reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+    const gastosPendentes = filteredExpenses
+      .filter((e) => e.status !== 'pago')
+      .reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+
+    const saldoLiquido = recebido - gastosMensais;
+
+    return {
+      contratado,
+      recebido,
+      pendente,
+      gastosMensais,
+      gastosPagos,
+      gastosPendentes,
+      saldoLiquido,
+    };
+  }, [unifiedIncomes, filteredExpenses, selectedYear, selectedMonth]);
 
   const handleAddTx = () => {
     if (!fTitle.trim() || !fAmount || !fClient.trim()) {
@@ -94,6 +405,7 @@ export default function FinanceiroPage() {
     setECategory('Ferramentas & SaaS');
     setEAmount('');
     setEDueDay('10');
+    setEDueDate(new Date().toISOString().split('T')[0]);
     setERecurring(true);
     setEStatus('pendente');
     setENotes('');
@@ -106,6 +418,7 @@ export default function FinanceiroPage() {
     setECategory(exp.category);
     setEAmount(String(exp.amount));
     setEDueDay(String(exp.due_day || 10));
+    setEDueDate(exp.due_date || new Date().toISOString().split('T')[0]);
     setERecurring(exp.recurring);
     setEStatus(exp.status === 'pago' ? 'pago' : 'pendente');
     setENotes(exp.notes || '');
@@ -114,7 +427,7 @@ export default function FinanceiroPage() {
 
   const handleSaveExpense = () => {
     if (!eTitle.trim() || !eAmount) {
-      alert('Preencha a descrição e o valor do gasto mensal.');
+      alert('Preencha a descrição e o valor do gasto.');
       return;
     }
 
@@ -123,6 +436,7 @@ export default function FinanceiroPage() {
       category: eCategory,
       amount: Number(eAmount) || 0,
       due_day: Math.min(31, Math.max(1, Number(eDueDay) || 10)),
+      due_date: eDueDate || new Date().toISOString().split('T')[0],
       recurring: eRecurring,
       status: eStatus,
       notes: eNotes.trim() || undefined,
@@ -138,10 +452,38 @@ export default function FinanceiroPage() {
     setIsExpenseModalOpen(false);
   };
 
-  const filteredTransactions = transactions.filter((t) => {
-    if (filterStatus === 'todos') return true;
-    return t.status === filterStatus;
-  });
+  const handleToggleIncomeStatus = (item: UnifiedIncomeItem) => {
+    if (item.source === 'transaction') {
+      crmService.toggleFinancialTransactionStatus(item.id);
+    } else {
+      const hp = historicalProjects.find((p) => p.id === item.id);
+      if (hp) {
+        const currentlyPaid = item.status === 'pago';
+        crmService.updateHistoricalProject(hp.id, {
+          status: currentlyPaid ? 'pendente' : 'concluido',
+          amount_received: currentlyPaid ? 0 : hp.amount_contracted,
+          amount_pending: currentlyPaid ? hp.amount_contracted : 0,
+        });
+      }
+    }
+    refreshData();
+  };
+
+  const handleDeleteIncome = (item: UnifiedIncomeItem) => {
+    if (item.source === 'transaction') {
+      crmService.deleteFinancialTransaction(item.id);
+    } else {
+      crmService.deleteHistoricalProject(item.id);
+    }
+    refreshData();
+  };
+
+  const activePeriodLabel = useMemo(() => {
+    if (selectedMonth === 'todos' && selectedYear === 'todos') return 'Acumulado Geral (Todos os Meses)';
+    if (selectedMonth === 'todos') return `Ano de ${selectedYear}`;
+    const mName = MONTH_NAMES[selectedMonth]?.full || '';
+    return selectedYear === 'todos' ? `${mName} (Todos os Anos)` : `${mName} de ${selectedYear}`;
+  }, [selectedMonth, selectedYear]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
@@ -150,13 +492,13 @@ export default function FinanceiroPage() {
         <div>
           <div className="flex items-center gap-2 text-xs font-mono text-[#8EB69B] uppercase tracking-wider mb-1">
             <DollarSign className="w-3.5 h-3.5" />
-            Gestão Financeira • Receitas &amp; Gastos Mensais
+            Gestão Financeira • Entradas &amp; Saídas por Mês
           </div>
           <h1 className="text-2xl lg:text-3xl font-semibold text-[#E7ECE8] font-heading">
             Financeiro &amp; Faturamento
           </h1>
           <p className="text-xs text-[#9BA6A0] mt-1">
-            Controle de projetos fechados, valores recebidos, pendências e gastos mensais operacionais.
+            Acompanhe todas as entradas de projetos, saídas operacionais e o saldo líquido mês a mês.
           </p>
         </div>
 
@@ -173,120 +515,306 @@ export default function FinanceiroPage() {
             onClick={handleOpenCreateExpense}
           >
             <TrendingDown className="w-3.5 h-3.5 text-red-400" />
-            <span>+ Gasto Mensal</span>
+            <span>+ Nova Saída (Gasto)</span>
           </Button>
           <Button variant="primary" size="sm" className="gap-1.5" onClick={() => setIsModalOpen(true)}>
             <Plus className="w-3.5 h-3.5 text-[#07100F]" />
-            <span>Novo Lançamento</span>
+            <span>+ Nova Entrada (Receita)</span>
           </Button>
         </div>
       </div>
 
-      {/* Grid Principal de 4 Métricas: Contratado, Recebido, Pendente e Gastos Mensais */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        {/* Contratado */}
-        <div className="p-5 rounded-2xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)]">
-          <span className="text-xs font-mono uppercase tracking-wider text-[#9BA6A0]">
-            Valor Contratado
-          </span>
-          <div className="text-2xl lg:text-3xl font-semibold font-heading text-[#E7ECE8] mt-2 tracking-tight">
-            R$ {summary.contratado.toLocaleString('pt-BR')}
+      {/* Barra de Filtro por Mês e Ano */}
+      <div className="p-4 rounded-2xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 text-xs font-mono text-[#8EB69B] mr-1">
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Período:</span>
           </div>
-          <p className="text-xs text-[#9BA6A0] mt-1">
-            Soma de projetos fechados e contratos.
-          </p>
+
+          {/* Seletor de Ano */}
+          <select
+            value={selectedYear}
+            onChange={(e) => setSelectedYear(e.target.value)}
+            className="px-2.5 py-1.5 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.1)] text-xs font-mono text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+          >
+            <option value="todos">Todos os Anos</option>
+            {availableYears.map((yr) => (
+              <option key={yr} value={yr}>
+                Ano {yr}
+              </option>
+            ))}
+          </select>
+
+          {/* Pílulas de Meses */}
+          <div className="flex items-center gap-1 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setSelectedMonth('todos')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-all ${
+                selectedMonth === 'todos'
+                  ? 'bg-[#8EB69B] text-[#07100F] font-semibold'
+                  : 'bg-[#10201E] text-[#9BA6A0] hover:text-[#E7ECE8]'
+              }`}
+            >
+              Todos os Meses
+            </button>
+            {MONTH_NAMES.map((m) => (
+              <button
+                key={m.index}
+                type="button"
+                onClick={() => setSelectedMonth(m.index)}
+                className={`px-2 py-1 rounded-lg text-xs font-mono transition-all ${
+                  selectedMonth === m.index
+                    ? 'bg-[#8EB69B] text-[#07100F] font-semibold'
+                    : 'bg-[#10201E] text-[#9BA6A0] hover:text-[#E7ECE8]'
+                }`}
+              >
+                {m.short}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Recebido */}
-        <div className="p-5 rounded-2xl bg-[#0C1A19] border border-[rgba(142,182,155,0.2)]">
+        {(selectedMonth !== 'todos' || selectedYear !== 'todos') && (
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedMonth('todos');
+              setSelectedYear('todos');
+            }}
+            className="text-xs font-mono text-[#8EB69B] hover:underline self-start lg:self-auto"
+          >
+            Limpar filtro de período
+          </button>
+        )}
+      </div>
+
+      {/* Grid Principal de 4 Métricas: Entradas Recebidas, Saídas, Saldo Líquido e Pendente */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        {/* Entradas Recebidas */}
+        <div className="p-5 rounded-2xl bg-[#0C1A19] border border-[rgba(142,182,155,0.25)]">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono uppercase tracking-wider text-[#8EB69B]">
-              Valor Recebido
+            <span className="text-xs font-mono uppercase tracking-wider text-[#8EB69B] flex items-center gap-1">
+              <ArrowUpRight className="w-3.5 h-3.5" />
+              Entradas (Recebido)
             </span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#8EB69B]/10 text-[#8EB69B] font-mono">
-              Liquidado
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#8EB69B]/10 text-[#8EB69B] font-mono">
+              + Receita
             </span>
           </div>
           <div className="text-2xl lg:text-3xl font-semibold font-heading text-[#8EB69B] mt-2 tracking-tight">
-            R$ {summary.recebido.toLocaleString('pt-BR')}
+            + R$ {kpiMetrics.recebido.toLocaleString('pt-BR')}
           </div>
           <p className="text-xs text-[#9BA6A0] mt-1">
-            Saldo Líquido: <strong className="text-[#E7ECE8] font-mono">R$ {summary.saldoLiquido.toLocaleString('pt-BR')}</strong>
+            Contratado no período: <strong className="text-[#E7ECE8] font-mono">R$ {kpiMetrics.contratado.toLocaleString('pt-BR')}</strong>
           </p>
         </div>
 
-        {/* Pendente */}
+        {/* Saídas / Gastos */}
+        <div className="p-5 rounded-2xl bg-[#0C1A19] border border-red-900/30">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono uppercase tracking-wider text-red-400 flex items-center gap-1">
+              <ArrowDownRight className="w-3.5 h-3.5" />
+              Saídas (Gastos)
+            </span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 font-mono">
+              - Despesas
+            </span>
+          </div>
+          <div className="text-2xl lg:text-3xl font-semibold font-heading text-red-400 mt-2 tracking-tight">
+            - R$ {kpiMetrics.gastosMensais.toLocaleString('pt-BR')}
+          </div>
+          <p className="text-xs text-[#9BA6A0] mt-1">
+            Pago: R$ {kpiMetrics.gastosPagos.toLocaleString('pt-BR')} • Pendente: R$ {kpiMetrics.gastosPendentes.toLocaleString('pt-BR')}
+          </p>
+        </div>
+
+        {/* Saldo Líquido (Entradas - Saídas) */}
+        <div className="p-5 rounded-2xl bg-[#0C1A19] border border-[rgba(218,241,222,0.12)]">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono uppercase tracking-wider text-[#E7ECE8]">
+              Saldo Líquido (Lucro)
+            </span>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                kpiMetrics.saldoLiquido >= 0
+                  ? 'bg-[#8EB69B]/10 text-[#8EB69B]'
+                  : 'bg-red-500/10 text-red-400'
+              }`}
+            >
+              Entradas - Saídas
+            </span>
+          </div>
+          <div
+            className={`text-2xl lg:text-3xl font-semibold font-heading mt-2 tracking-tight ${
+              kpiMetrics.saldoLiquido >= 0 ? 'text-[#E7ECE8]' : 'text-red-400'
+            }`}
+          >
+            R$ {kpiMetrics.saldoLiquido.toLocaleString('pt-BR')}
+          </div>
+          <p className="text-xs text-[#9BA6A0] mt-1 truncate" title={activePeriodLabel}>
+            {activePeriodLabel}
+          </p>
+        </div>
+
+        {/* A Receber / Pendente */}
         <div className="p-5 rounded-2xl bg-[#0C1A19] border border-[rgba(241,249,161,0.2)]">
           <div className="flex items-center justify-between">
             <span className="text-xs font-mono uppercase tracking-wider text-[#F1F9A1]">
               Valor Pendente
             </span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#F1F9A1]/10 text-[#F1F9A1] font-mono">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#F1F9A1]/10 text-[#F1F9A1] font-mono">
               A Receber
             </span>
           </div>
           <div className="text-2xl lg:text-3xl font-semibold font-heading text-[#F1F9A1] mt-2 tracking-tight">
-            R$ {summary.pendente.toLocaleString('pt-BR')}
+            R$ {kpiMetrics.pendente.toLocaleString('pt-BR')}
           </div>
           <p className="text-xs text-[#9BA6A0] mt-1">
-            Parcelas e faturamentos a receber.
-          </p>
-        </div>
-
-        {/* Gastos Mensais */}
-        <div className="p-5 rounded-2xl bg-[#0C1A19] border border-red-900/30">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono uppercase tracking-wider text-red-400">
-              Gastos Mensais
-            </span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-red-500/10 text-red-400 font-mono">
-              Despesas
-            </span>
-          </div>
-          <div className="text-2xl lg:text-3xl font-semibold font-heading text-red-400 mt-2 tracking-tight">
-            R$ {summary.gastosMensais.toLocaleString('pt-BR')}
-          </div>
-          <p className="text-xs text-[#9BA6A0] mt-1">
-            Pago: R$ {summary.gastosPagos.toLocaleString('pt-BR')} • Pendente: R$ {summary.gastosPendentes.toLocaleString('pt-BR')}
+            Parcelas e faturamentos em aberto.
           </p>
         </div>
       </div>
 
-      {/* Seção de Gastos Mensais / Custos Operacionais */}
+      {/* Tabela Consolidada: Entradas e Saídas por Mês */}
+      <Card className="p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[rgba(218,241,222,0.06)] pb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-[#8EB69B]" />
+              <h3 className="text-base font-medium text-[#E7ECE8] font-heading">
+                Balanço Mensal — Entradas e Saídas por Mês
+              </h3>
+            </div>
+            <p className="text-xs text-[#9BA6A0] mt-0.5">
+              Clique em qualquer mês abaixo para filtrar os lançamentos detalhados de entradas e saídas daquele mês.
+            </p>
+          </div>
+          {selectedMonth !== 'todos' && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setSelectedMonth('todos');
+                setSelectedYear('todos');
+              }}
+            >
+              Ver Todos os Meses
+            </Button>
+          )}
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-[rgba(218,241,222,0.06)] text-[11px] font-mono text-[#65706A] uppercase">
+                <th className="py-3 px-3">Mês / Ano</th>
+                <th className="py-3 px-3">Movimentações</th>
+                <th className="py-3 px-3 text-[#8EB69B]">Entradas (Recebido)</th>
+                <th className="py-3 px-3 text-[#F1F9A1]">A Receber</th>
+                <th className="py-3 px-3 text-red-400">Saídas (Gastos)</th>
+                <th className="py-3 px-3 text-right">Saldo do Mês</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[rgba(218,241,222,0.04)]">
+              {monthlyBreakdown.map((row) => {
+                const isSelected =
+                  selectedMonth === row.month &&
+                  (selectedYear === 'todos' || selectedYear === String(row.year));
+
+                return (
+                  <tr
+                    key={row.monthKey}
+                    onClick={() => {
+                      if (isSelected) {
+                        setSelectedMonth('todos');
+                      } else {
+                        setSelectedYear(String(row.year));
+                        setSelectedMonth(row.month);
+                      }
+                    }}
+                    className={`cursor-pointer transition-colors ${
+                      isSelected
+                        ? 'bg-[#8EB69B]/10 border-l-2 border-l-[#8EB69B]'
+                        : 'hover:bg-[#10201E]/50'
+                    }`}
+                  >
+                    <td className="py-3.5 px-3 font-medium text-[#E7ECE8] flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-[#8EB69B]" />
+                      <span>{row.label}</span>
+                      {isSelected && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#8EB69B] text-[#07100F] font-mono font-semibold">
+                          Filtrado
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-3 text-[#9BA6A0] font-mono">
+                      {row.incomesCount} entrada(s) • {row.expensesCount} saída(s)
+                    </td>
+                    <td className="py-3.5 px-3 font-mono font-semibold text-[#8EB69B]">
+                      + R$ {row.entradasRecebidas.toLocaleString('pt-BR')}
+                    </td>
+                    <td className="py-3.5 px-3 font-mono text-[#F1F9A1]">
+                      R$ {row.entradasPendentes.toLocaleString('pt-BR')}
+                    </td>
+                    <td className="py-3.5 px-3 font-mono font-semibold text-red-400">
+                      - R$ {row.saidasTotal.toLocaleString('pt-BR')}
+                    </td>
+                    <td className="py-3.5 px-3 text-right font-mono font-semibold">
+                      <span
+                        className={`px-2.5 py-1 rounded-lg ${
+                          row.saldoMes >= 0
+                            ? 'bg-[#8EB69B]/10 text-[#8EB69B]'
+                            : 'bg-red-500/10 text-red-400'
+                        }`}
+                      >
+                        {row.saldoMes >= 0 ? '+' : ''} R$ {row.saldoMes.toLocaleString('pt-BR')}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {/* Seção de Saídas: Gastos Mensais / Custos Operacionais */}
       <Card className="p-6 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[rgba(218,241,222,0.06)] pb-4">
           <div>
             <div className="flex items-center gap-2">
               <Wallet className="w-4 h-4 text-red-400" />
               <h3 className="text-base font-medium text-[#E7ECE8] font-heading">
-                Gastos Mensais &amp; Custos Fixos
+                Saídas — Gastos Mensais &amp; Despesas ({activePeriodLabel})
               </h3>
             </div>
             <p className="text-xs text-[#9BA6A0] mt-0.5">
-              Assinaturas, servidores, ferramentas de IA, tráfego e despesas operacionais mensais.
+              Assinaturas, servidores, ferramentas de IA, tráfego e despesas operacionais.
             </p>
           </div>
 
           <Button variant="secondary" size="sm" className="gap-1.5" onClick={handleOpenCreateExpense}>
             <Plus className="w-3.5 h-3.5" />
-            <span>Adicionar Gasto Mensal</span>
+            <span>Adicionar Gasto</span>
           </Button>
         </div>
 
-        {expenses.length === 0 ? (
+        {filteredExpenses.length === 0 ? (
           <div className="py-10 text-center">
             <div className="w-10 h-10 rounded-2xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] flex items-center justify-center text-red-400 mx-auto mb-2.5">
               <TrendingDown className="w-5 h-5" />
             </div>
             <h4 className="text-sm font-semibold text-[#E7ECE8] font-heading">
-              Nenhum gasto mensal cadastrado
+              Nenhuma saída registrada neste período
             </h4>
             <p className="text-xs text-[#9BA6A0] max-w-sm mx-auto mt-1 mb-4">
-              Cadastre seus custos fixos ou variáveis (ex: Hospedagem, Cursor/IA, Domínios, Internet) para acompanhar o lucro líquido real.
+              Cadastre seus custos fixos ou variáveis (ex: Hospedagem, Cursor/IA, Domínios, Internet) para acompanhar o lucro líquido de cada mês.
             </p>
             <Button variant="secondary" size="sm" className="gap-1.5 text-xs mx-auto" onClick={handleOpenCreateExpense}>
               <Plus className="w-3.5 h-3.5" />
-              <span>Cadastrar Primeiro Gasto</span>
+              <span>Cadastrar Gasto</span>
             </Button>
           </div>
         ) : (
@@ -297,13 +825,13 @@ export default function FinanceiroPage() {
                   <th className="py-3 px-3">Descrição do Gasto</th>
                   <th className="py-3 px-3">Categoria</th>
                   <th className="py-3 px-3">Tipo / Vencimento</th>
-                  <th className="py-3 px-3">Valor Mensal</th>
-                  <th className="py-3 px-3">Status no Mês</th>
+                  <th className="py-3 px-3">Valor</th>
+                  <th className="py-3 px-3">Status</th>
                   <th className="py-3 px-3 text-right">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[rgba(218,241,222,0.04)]">
-                {expenses.map((exp) => (
+                {filteredExpenses.map((exp) => (
                   <tr key={exp.id} className="hover:bg-[#10201E]/40 transition-colors">
                     <td className="py-3 px-3">
                       <span className="font-medium text-[#E7ECE8]">{exp.title}</span>
@@ -313,7 +841,11 @@ export default function FinanceiroPage() {
                     <td className="py-3 px-3 font-mono text-[#9BA6A0]">
                       <div className="flex items-center gap-1.5">
                         {exp.recurring && <Repeat className="w-3 h-3 text-[#8EB69B]" />}
-                        <span>{exp.recurring ? `Fixo • Dia ${exp.due_day}` : `Avulso • Dia ${exp.due_day}`}</span>
+                        <span>
+                          {exp.recurring
+                            ? `Fixo Mensal • Todo dia ${exp.due_day}`
+                            : `Único • ${exp.due_date ? parseDateSafe(exp.due_date).formatted : `Dia ${exp.due_day}`}`}
+                        </span>
                       </div>
                     </td>
                     <td className="py-3 px-3 font-mono font-semibold text-red-400">
@@ -367,43 +899,46 @@ export default function FinanceiroPage() {
         )}
       </Card>
 
-      {/* Tabela de Transações & Lançamentos de Projetos */}
+      {/* Tabela de Entradas: Receitas & Projetos Fechados */}
       <Card className="p-6 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[rgba(218,241,222,0.06)] pb-4">
           <div>
-            <h3 className="text-base font-medium text-[#E7ECE8] font-heading">
-              Receitas &amp; Projetos Fechados
-            </h3>
+            <div className="flex items-center gap-2">
+              <DollarSign className="w-4 h-4 text-[#8EB69B]" />
+              <h3 className="text-base font-medium text-[#E7ECE8] font-heading">
+                Entradas — Receitas &amp; Projetos Fechados ({activePeriodLabel})
+              </h3>
+            </div>
             <p className="text-xs text-[#9BA6A0] mt-0.5">
-              Projetos fechados no Pipeline entram automaticamente aqui e em Meu Histórico.
+              Todos os lançamentos de receitas e projetos fechados no Pipeline detalhados por data e mês.
             </p>
           </div>
 
           <div className="flex items-center gap-2">
+            <Filter className="w-3.5 h-3.5 text-[#65706A]" />
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
               className="px-3 py-1.5 text-xs rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
             >
               <option value="todos">Todos os Status</option>
-              <option value="pago">Pago</option>
+              <option value="pago">Pago / Liquidado</option>
               <option value="pendente">Pendente</option>
               <option value="parcialmente_pago">Parcialmente Pago</option>
-              <option value="atrasado">Atrasado</option>
             </select>
           </div>
         </div>
 
-        {filteredTransactions.length === 0 ? (
+        {filteredIncomes.length === 0 ? (
           <div className="py-14 text-center">
             <div className="w-12 h-12 rounded-2xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] flex items-center justify-center text-[#8EB69B] mx-auto mb-3">
               <DollarSign className="w-6 h-6" />
             </div>
             <h4 className="text-base font-semibold text-[#E7ECE8] font-heading">
-              Nenhum lançamento financeiro
+              Nenhuma entrada encontrada neste período
             </h4>
             <p className="text-xs text-[#9BA6A0] max-w-sm mx-auto mt-1 mb-5">
-              Quando você mover um lead para &ldquo;Fechado&rdquo; no Pipeline, o valor do projeto aparecerá aqui automaticamente.
+              Quando você mover um lead para &ldquo;Fechado&rdquo; no Pipeline ou registrar um lançamento, o valor aparecerá aqui automaticamente.
             </p>
             <Button
               variant="primary"
@@ -412,7 +947,7 @@ export default function FinanceiroPage() {
               onClick={() => setIsModalOpen(true)}
             >
               <Plus className="w-3.5 h-3.5 text-[#07100F]" />
-              <span>Adicionar Primeiro Lançamento</span>
+              <span>Adicionar Entrada</span>
             </Button>
           </div>
         ) : (
@@ -420,9 +955,9 @@ export default function FinanceiroPage() {
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-[rgba(218,241,222,0.06)] text-[11px] font-mono text-[#65706A] uppercase">
-                  <th className="py-3 px-3">Título / Cliente</th>
+                  <th className="py-3 px-3">Projeto / Cliente</th>
                   <th className="py-3 px-3">Categoria</th>
-                  <th className="py-3 px-3">Data</th>
+                  <th className="py-3 px-3">Mês / Data</th>
                   <th className="py-3 px-3">Contratado</th>
                   <th className="py-3 px-3">Recebido</th>
                   <th className="py-3 px-3">Pendente</th>
@@ -430,70 +965,71 @@ export default function FinanceiroPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[rgba(218,241,222,0.04)]">
-                {filteredTransactions.map((item) => (
-                  <tr key={item.id} className="hover:bg-[#10201E]/40 transition-colors">
-                    <td className="py-3 px-3">
-                      <span className="font-medium text-[#E7ECE8]">{item.title}</span>
-                      <div className="text-[11px] text-[#9BA6A0]">{item.client_name}</div>
-                    </td>
-                    <td className="py-3 px-3 text-[#9BA6A0]">{item.category}</td>
-                    <td className="py-3 px-3 font-mono text-[#65706A]">
-                      {new Date(item.due_date).toLocaleDateString('pt-BR')}
-                    </td>
-                    <td className="py-3 px-3 font-mono text-[#E7ECE8]">
-                      R$ {item.amount_contracted.toLocaleString('pt-BR')}
-                    </td>
-                    <td className="py-3 px-3 font-mono text-[#8EB69B]">
-                      R$ {item.amount_received.toLocaleString('pt-BR')}
-                    </td>
-                    <td className="py-3 px-3 font-mono text-[#F1F9A1]">
-                      R$ {item.amount_pending.toLocaleString('pt-BR')}
-                    </td>
-                    <td className="py-3 px-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            crmService.toggleFinancialTransactionStatus(item.id);
-                            refreshData();
-                          }}
-                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-mono cursor-pointer transition-all ${
-                            item.status === 'pago'
-                              ? 'bg-[#8EB69B]/10 text-[#8EB69B] border border-[#8EB69B]/20'
-                              : item.status === 'pendente'
-                              ? 'bg-[#F1F9A1]/10 text-[#F1F9A1] border border-[#F1F9A1]/20'
-                              : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                          }`}
-                          title="Clique para alternar entre Pago e Pendente"
-                        >
-                          {item.status.replace('_', ' ')}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            crmService.deleteFinancialTransaction(item.id);
-                            refreshData();
-                          }}
-                          className="p-1 rounded-lg text-[#65706A] hover:text-red-400 transition-all"
-                          title="Excluir lançamento"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {filteredIncomes.map((item) => {
+                  const parsed = parseDateSafe(item.date);
+                  const mShort = MONTH_NAMES[parsed.month]?.short || '';
+                  return (
+                    <tr key={`${item.source}-${item.id}`} className="hover:bg-[#10201E]/40 transition-colors">
+                      <td className="py-3 px-3">
+                        <span className="font-medium text-[#E7ECE8]">{item.title}</span>
+                        <div className="text-[11px] text-[#9BA6A0]">{item.client_name}</div>
+                      </td>
+                      <td className="py-3 px-3 text-[#9BA6A0]">{item.category}</td>
+                      <td className="py-3 px-3 font-mono text-[#9BA6A0]">
+                        <span className="px-2 py-0.5 rounded bg-[#10201E] text-[#8EB69B] mr-1.5">
+                          {mShort}/{parsed.year}
+                        </span>
+                        <span className="text-[#65706A]">{parsed.formatted}</span>
+                      </td>
+                      <td className="py-3 px-3 font-mono text-[#E7ECE8]">
+                        R$ {item.amount_contracted.toLocaleString('pt-BR')}
+                      </td>
+                      <td className="py-3 px-3 font-mono font-semibold text-[#8EB69B]">
+                        + R$ {item.amount_received.toLocaleString('pt-BR')}
+                      </td>
+                      <td className="py-3 px-3 font-mono text-[#F1F9A1]">
+                        R$ {item.amount_pending.toLocaleString('pt-BR')}
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleIncomeStatus(item)}
+                            className={`px-2.5 py-0.5 rounded-full text-[11px] font-mono cursor-pointer transition-all ${
+                              item.status === 'pago'
+                                ? 'bg-[#8EB69B]/10 text-[#8EB69B] border border-[#8EB69B]/20'
+                                : item.status === 'pendente'
+                                ? 'bg-[#F1F9A1]/10 text-[#F1F9A1] border border-[#F1F9A1]/20'
+                                : 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
+                            }`}
+                            title="Clique para alternar entre Pago e Pendente"
+                          >
+                            {item.status === 'pago' ? '✓ Pago' : item.status.replace('_', ' ')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteIncome(item)}
+                            className="p-1 rounded-lg text-[#65706A] hover:text-red-400 transition-all"
+                            title="Excluir lançamento"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </Card>
 
-      {/* Modal: Novo Lançamento de Receita */}
+      {/* Modal: Novo Lançamento de Receita (Entrada) */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title="Novo Lançamento Financeiro"
+        title="Nova Entrada Financeira"
         subtitle="Adicione uma nova receita ou projeto fechado no sistema."
         maxWidth="md"
       >
@@ -530,7 +1066,7 @@ export default function FinanceiroPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Data</label>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">Data de Competência</label>
               <input
                 type="date"
                 value={fDueDate}
@@ -567,18 +1103,18 @@ export default function FinanceiroPage() {
               Cancelar
             </Button>
             <Button variant="primary" size="sm" onClick={handleAddTx}>
-              Registrar Lançamento
+              Registrar Entrada
             </Button>
           </div>
         </div>
       </Modal>
 
-      {/* Modal: Cadastrar / Editar Gasto Mensal */}
+      {/* Modal: Cadastrar / Editar Gasto Mensal (Saída) */}
       <Modal
         isOpen={isExpenseModalOpen}
         onClose={() => setIsExpenseModalOpen(false)}
-        title={editingExpenseId ? 'Editar Gasto Mensal' : 'Novo Gasto Mensal'}
-        subtitle="Registre custos fixos ou variáveis da operação EvoPixel."
+        title={editingExpenseId ? 'Editar Saída / Gasto' : 'Nova Saída / Gasto Mensal'}
+        subtitle="Registre custos fixos mensais ou despesas pontuais de um mês específico."
         maxWidth="md"
       >
         <div className="space-y-4 text-xs">
@@ -610,7 +1146,7 @@ export default function FinanceiroPage() {
               </select>
             </div>
             <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Valor Mensal (R$) *</label>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">Valor (R$) *</label>
               <input
                 type="number"
                 value={eAmount}
@@ -623,29 +1159,41 @@ export default function FinanceiroPage() {
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Dia Vencimento</label>
-              <input
-                type="number"
-                min={1}
-                max={31}
-                value={eDueDay}
-                onChange={(e) => setEDueDay(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
-              />
-            </div>
-            <div>
               <label className="block text-[#9BA6A0] mb-1 font-medium">Recorrência</label>
               <select
                 value={eRecurring ? 'fixo' : 'unico'}
                 onChange={(e) => setERecurring(e.target.value === 'fixo')}
                 className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
               >
-                <option value="fixo">Fixo Mensal</option>
-                <option value="unico">Gasto Único</option>
+                <option value="fixo">Fixo Todo Mês</option>
+                <option value="unico">Único no Mês</option>
               </select>
             </div>
+            {eRecurring ? (
+              <div>
+                <label className="block text-[#9BA6A0] mb-1 font-medium">Dia Vencimento</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={eDueDay}
+                  onChange={(e) => setEDueDay(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="block text-[#9BA6A0] mb-1 font-medium">Data do Gasto</label>
+                <input
+                  type="date"
+                  value={eDueDate}
+                  onChange={(e) => setEDueDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+                />
+              </div>
+            )}
             <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Status no Mês</label>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">Status</label>
               <select
                 value={eStatus}
                 onChange={(e) => setEStatus(e.target.value as 'pago' | 'pendente')}
@@ -673,7 +1221,7 @@ export default function FinanceiroPage() {
               Cancelar
             </Button>
             <Button variant="primary" size="sm" onClick={handleSaveExpense}>
-              {editingExpenseId ? 'Salvar Alterações' : 'Adicionar Gasto'}
+              {editingExpenseId ? 'Salvar Alterações' : 'Registrar Saída'}
             </Button>
           </div>
         </div>

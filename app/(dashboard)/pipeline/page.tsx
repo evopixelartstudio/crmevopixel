@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import {
   Kanban,
+  List,
   Plus,
   ArrowRight,
   ArrowLeft,
@@ -17,6 +18,8 @@ import {
   Zap,
   Pencil,
   Trash2,
+  Search,
+  CheckCircle2,
 } from 'lucide-react';
 
 const STAGES = [
@@ -33,6 +36,9 @@ export default function PipelinePage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>(() =>
     crmService.getOpportunities()
   );
+  const [viewMode, setViewMode] = useState<'lista' | 'kanban'>('lista');
+  const [selectedStageFilter, setSelectedStageFilter] = useState<string>('todos');
+  const [searchTerm, setSearchTerm] = useState('');
   const [isNewOppModalOpen, setIsNewOppModalOpen] = useState(false);
 
   // Estado de edição e exclusão
@@ -189,6 +195,38 @@ export default function PipelinePage() {
     .filter((o) => o.stage_slug !== 'lead_perdido' && o.stage_slug !== 'perdido' && o.stage_slug !== 'fechado')
     .reduce((acc, o) => acc + (o.estimated_value || 0), 0);
 
+  const filteredListOpps = opportunities.filter((opp) => {
+    const normalizedStage = opp.stage_slug === 'negociacao' ? 'proposta' : opp.stage_slug;
+    const matchesStage = selectedStageFilter === 'todos' || normalizedStage === selectedStageFilter;
+    const q = searchTerm.trim().toLowerCase();
+    const matchesSearch =
+      !q ||
+      (opp.company_name || '').toLowerCase().includes(q) ||
+      (opp.lead_name || '').toLowerCase().includes(q) ||
+      (opp.title || '').toLowerCase().includes(q) ||
+      (opp.services || []).some((s) => s.toLowerCase().includes(q));
+    return matchesStage && matchesSearch;
+  });
+
+  const getStageBadgeColor = (slug: string) => {
+    switch (slug) {
+      case 'primeiro_contato':
+        return 'bg-blue-500/10 text-blue-300 border-blue-500/25';
+      case 'proposta':
+        return 'bg-[#F1F9A1]/10 text-[#F1F9A1] border-[#F1F9A1]/25';
+      case 'projeto_em_andamento':
+        return 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30';
+      case 'fechado':
+        return 'bg-[#8EB69B]/15 text-[#8EB69B] border-[#8EB69B]/30';
+      case 'follow_up':
+        return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+      case 'lead_perdido':
+        return 'bg-red-500/10 text-red-400 border-red-500/25';
+      default:
+        return 'bg-[#10201E] text-[#9BA6A0] border-[rgba(218,241,222,0.1)]';
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
       {/* Cabeçalho */}
@@ -206,7 +244,35 @@ export default function PipelinePage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Alternador Lista / Kanban */}
+          <div className="inline-flex p-1 rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)]">
+            <button
+              type="button"
+              onClick={() => setViewMode('lista')}
+              className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all ${
+                viewMode === 'lista'
+                  ? 'bg-[#10201E] text-[#F1F9A1] font-medium border border-[rgba(241,249,161,0.2)]'
+                  : 'text-[#9BA6A0] hover:text-[#E7ECE8]'
+              }`}
+            >
+              <List className="w-3.5 h-3.5" />
+              <span>Lista</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('kanban')}
+              className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all ${
+                viewMode === 'kanban'
+                  ? 'bg-[#10201E] text-[#F1F9A1] font-medium border border-[rgba(241,249,161,0.2)]'
+                  : 'text-[#9BA6A0] hover:text-[#E7ECE8]'
+              }`}
+            >
+              <Kanban className="w-3.5 h-3.5" />
+              <span>Colunas</span>
+            </button>
+          </div>
+
           <div className="px-3.5 py-1.5 rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] flex items-center gap-2 text-xs">
             <span className="text-[#9BA6A0]">Valor Ativo:</span>
             <span className="font-semibold text-[#F1F9A1] font-mono">
@@ -226,214 +292,465 @@ export default function PipelinePage() {
         </div>
       </div>
 
-      {/* Kanban Board com Drag & Drop */}
-      <div className="flex gap-4 overflow-x-auto pb-6 pt-1">
-        {STAGES.map((stage, stageIndex) => {
-          const stageOpps = opportunities.filter(
-            (o) => o.stage_slug === stage.slug || (stage.slug === 'proposta' && o.stage_slug === 'negociacao')
-          );
-          const stageTotal = stageOpps.reduce((acc, o) => acc + (o.estimated_value || 0), 0);
-
-          return (
-            <div
-              key={stage.slug}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const oppId = e.dataTransfer.getData('text/plain');
-                if (oppId) setStage(oppId, stage.slug);
-              }}
-              className="w-72 shrink-0 flex flex-col rounded-2xl bg-[#0C1A19]/70 border border-[rgba(218,241,222,0.07)] hover:border-[rgba(218,241,222,0.18)] transition-all overflow-hidden"
-            >
-              {/* Header da Coluna */}
-              <div className="p-3.5 border-b border-[rgba(218,241,222,0.06)] bg-[#07100F]/60 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-[#E7ECE8] font-heading">
-                    {stage.name}
-                  </span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#10201E] text-[#9BA6A0]">
-                    {stageOpps.length}
-                  </span>
-                </div>
-                <span className="text-[11px] font-mono text-[#8EB69B]">
-                  R$ {stageTotal.toLocaleString('pt-BR')}
+      {/* MODO LISTA (PADRÃO) */}
+      {viewMode === 'lista' && (
+        <div className="space-y-4">
+          {/* Filtros por Etapa + Busca */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSelectedStageFilter('todos')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-heading transition-all flex items-center gap-1.5 border ${
+                  selectedStageFilter === 'todos'
+                    ? 'bg-[#10201E] text-[#F1F9A1] border-[rgba(241,249,161,0.25)] font-medium'
+                    : 'bg-[#0C1A19] text-[#9BA6A0] border-[rgba(218,241,222,0.06)] hover:text-[#E7ECE8]'
+                }`}
+              >
+                <span>Todas</span>
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#07100F] text-[#8EB69B]">
+                  {opportunities.length}
                 </span>
-              </div>
+              </button>
 
-              {/* Lista de Cards da Coluna */}
-              <div className="p-3 space-y-3 flex-1 overflow-y-auto max-h-[68vh] min-h-[140px]">
-                {stageOpps.map((opp) => (
-                  <div
-                    key={opp.id}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('text/plain', opp.id);
-                    }}
-                    className="p-3.5 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.22)] cursor-grab active:cursor-grabbing transition-all group shadow-sm flex flex-col justify-between space-y-2.5"
+              {STAGES.map((stage) => {
+                const count = opportunities.filter(
+                  (o) =>
+                    o.stage_slug === stage.slug ||
+                    (stage.slug === 'proposta' && o.stage_slug === 'negociacao')
+                ).length;
+                return (
+                  <button
+                    key={stage.slug}
+                    type="button"
+                    onClick={() => setSelectedStageFilter(stage.slug)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-heading transition-all flex items-center gap-1.5 border ${
+                      selectedStageFilter === stage.slug
+                        ? 'bg-[#10201E] text-[#F1F9A1] border-[rgba(241,249,161,0.25)] font-medium'
+                        : 'bg-[#0C1A19] text-[#9BA6A0] border-[rgba(218,241,222,0.06)] hover:text-[#E7ECE8]'
+                    }`}
                   >
-                    <div>
-                      <div className="flex items-start justify-between gap-1.5 mb-1">
-                        <span className="text-xs font-semibold text-[#E7ECE8] font-heading leading-snug">
-                          {opp.company_name}
-                        </span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <Badge temperature={opp.temperature} className="text-[9px] py-0 px-1">
-                            {opp.score}
-                          </Badge>
-                          <button
-                            type="button"
-                            onClick={(e) => handleOpenEditModal(opp, e)}
-                            className="p-1 rounded-lg bg-[#07100F]/70 hover:bg-[#163832] text-[#9BA6A0] hover:text-[#F1F9A1] transition-colors"
-                            title="Editar lead / oportunidade"
-                          >
-                            <Pencil className="w-3 h-3" />
-                          </button>
-                          {deletingOppId === opp.id ? (
-                            <div className="flex items-center gap-1 bg-red-500/15 border border-red-500/30 rounded-lg px-1.5 py-0.5">
+                    <span>{stage.name}</span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#07100F] text-[#9BA6A0]">
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="relative w-full lg:w-64">
+              <Search className="w-3.5 h-3.5 text-[#8EB69B] absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Buscar empresa, contato, serviço..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#65706A] focus:outline-none focus:border-[#8EB69B]"
+              />
+            </div>
+          </div>
+
+          {/* Tabela em Lista do Pipeline */}
+          <div className="bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] rounded-2xl overflow-hidden shadow-sm">
+            {filteredListOpps.length === 0 ? (
+              <div className="p-12 text-center text-xs text-[#9BA6A0]">
+                Nenhum lead/oportunidade encontrado nesta etapa do Pipeline.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-[rgba(218,241,222,0.06)] bg-[#07100F] text-[11px] font-mono text-[#65706A] uppercase tracking-wider">
+                      <th className="py-3.5 px-4">Empresa / Lead</th>
+                      <th className="py-3.5 px-4">Escopo &amp; Serviços</th>
+                      <th className="py-3.5 px-4">Etapa no Pipeline</th>
+                      <th className="py-3.5 px-4">Temperatura</th>
+                      <th className="py-3.5 px-4">Valor do Projeto</th>
+                      <th className="py-3.5 px-4 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[rgba(218,241,222,0.05)]">
+                    {filteredListOpps.map((opp) => {
+                      const currentSlug =
+                        opp.stage_slug === 'negociacao' ? 'proposta' : opp.stage_slug;
+
+                      return (
+                        <tr
+                          key={opp.id}
+                          className="hover:bg-[#10201E]/50 transition-colors group"
+                        >
+                          {/* Empresa / Contato */}
+                          <td className="py-3.5 px-4">
+                            <div className="font-semibold text-[#E7ECE8] font-heading text-sm">
+                              {opp.company_name}
+                            </div>
+                            <div className="text-[11px] text-[#9BA6A0]">
+                              {opp.lead_name || 'Contato Principal'}
+                            </div>
+                            {currentSlug === 'projeto_em_andamento' && (
+                              <Link
+                                href="/tarefas"
+                                className="inline-flex items-center gap-1 text-[10px] font-mono text-[#8EB69B] hover:text-[#F1F9A1] mt-1"
+                              >
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>Ver checklist de 4 etapas em Tarefas →</span>
+                              </Link>
+                            )}
+                            {currentSlug === 'fechado' && (
+                              <div className="text-[10px] font-mono text-[#8EB69B] mt-1">
+                                ✓ Sincronizado em Clientes &amp; Financeiro
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Escopo & Serviços */}
+                          <td className="py-3.5 px-4">
+                            <div className="text-[#E7ECE8] font-medium">{opp.title}</div>
+                            {opp.services && opp.services.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {opp.services.map((s, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="text-[10px] px-1.5 py-0.5 rounded bg-[#10201E] text-[#9BA6A0] border border-[rgba(218,241,222,0.06)]"
+                                  >
+                                    {s}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Etapa (Select direto para mudar etapa com 1 clique) */}
+                          <td className="py-3.5 px-4">
+                            <select
+                              value={currentSlug}
+                              onChange={(e) => setStage(opp.id, e.target.value)}
+                              className={`px-2.5 py-1.5 rounded-xl text-xs font-medium border focus:outline-none cursor-pointer transition-all ${getStageBadgeColor(
+                                currentSlug
+                              )}`}
+                            >
+                              {STAGES.map((st) => (
+                                <option
+                                  key={st.slug}
+                                  value={st.slug}
+                                  className="bg-[#0C1A19] text-[#E7ECE8]"
+                                >
+                                  {st.name}
+                                </option>
+                              ))}
+                            </select>
+
+                            {currentSlug === 'proposta' && (
+                              <div className="flex items-center gap-1 text-[10px] text-[#F1F9A1] font-mono mt-1">
+                                <Clock className="w-3 h-3" />
+                                <span>
+                                  {(() => {
+                                    const entered = opp.stage_entered_at
+                                      ? new Date(opp.stage_entered_at).getTime()
+                                      : Date.now();
+                                    const elapsedHours = Math.floor(
+                                      (Date.now() - entered) / (1000 * 60 * 60)
+                                    );
+                                    const remaining = Math.max(0, 24 - elapsedHours);
+                                    return remaining > 0
+                                      ? `${remaining}h p/ Follow-up`
+                                      : 'Indo p/ Follow-up';
+                                  })()}
+                                </span>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Temperatura & Score */}
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-1.5">
+                              <Badge temperature={opp.temperature}>
+                                {opp.temperature === 'quente' && '🔥 Quente'}
+                                {opp.temperature === 'morno' && '● Morno'}
+                                {opp.temperature === 'frio' && '○ Frio'}
+                              </Badge>
+                              <span className="text-[11px] font-mono text-[#9BA6A0]">
+                                ({opp.score} pts)
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Valor */}
+                          <td className="py-3.5 px-4">
+                            <div className="text-sm font-semibold font-mono text-[#F1F9A1]">
+                              R$ {(opp.estimated_value || 0).toLocaleString('pt-BR')}
+                            </div>
+                            <div className="text-[10px] font-mono text-[#65706A]">
+                              {opp.probability}% probabilidade
+                            </div>
+                          </td>
+
+                          {/* Ações (Editar e Excluir) */}
+                          <td className="py-3.5 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
                               <button
                                 type="button"
-                                onClick={(e) => handleDeleteOpp(opp.id, e)}
-                                className="text-[9px] font-semibold text-red-400 hover:text-red-300"
+                                onClick={(e) => handleOpenEditModal(opp, e)}
+                                className="px-2.5 py-1.5 rounded-xl bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#F1F9A1] text-xs flex items-center gap-1 transition-all"
+                                title="Editar lead"
                               >
-                                Excluir
+                                <Pencil className="w-3.5 h-3.5" />
+                                <span>Editar</span>
                               </button>
+
+                              {deletingOppId === opp.id ? (
+                                <div className="flex items-center gap-1 bg-red-500/15 border border-red-500/30 rounded-xl px-2 py-1">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleDeleteOpp(opp.id, e)}
+                                    className="text-[11px] font-semibold text-red-400 hover:text-red-300 px-1"
+                                  >
+                                    Confirmar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setDeletingOppId(null);
+                                    }}
+                                    className="text-[11px] text-[#9BA6A0] hover:text-[#E7ECE8] px-1"
+                                  >
+                                    Não
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeletingOppId(opp.id);
+                                  }}
+                                  className="p-1.5 rounded-xl bg-[#10201E] hover:bg-red-500/20 border border-[rgba(218,241,222,0.06)] text-[#65706A] hover:text-red-400 transition-colors"
+                                  title="Excluir do Pipeline"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODO KANBAN (COLUNAS) */}
+      {viewMode === 'kanban' && (
+        <div className="flex gap-4 overflow-x-auto pb-6 pt-1">
+          {STAGES.map((stage, stageIndex) => {
+            const stageOpps = opportunities.filter(
+              (o) => o.stage_slug === stage.slug || (stage.slug === 'proposta' && o.stage_slug === 'negociacao')
+            );
+            const stageTotal = stageOpps.reduce((acc, o) => acc + (o.estimated_value || 0), 0);
+
+            return (
+              <div
+                key={stage.slug}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const oppId = e.dataTransfer.getData('text/plain');
+                  if (oppId) setStage(oppId, stage.slug);
+                }}
+                className="w-72 shrink-0 flex flex-col rounded-2xl bg-[#0C1A19]/70 border border-[rgba(218,241,222,0.07)] hover:border-[rgba(218,241,222,0.18)] transition-all overflow-hidden"
+              >
+                {/* Header da Coluna */}
+                <div className="p-3.5 border-b border-[rgba(218,241,222,0.06)] bg-[#07100F]/60 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-[#E7ECE8] font-heading">
+                      {stage.name}
+                    </span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#10201E] text-[#9BA6A0]">
+                      {stageOpps.length}
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-mono text-[#8EB69B]">
+                    R$ {stageTotal.toLocaleString('pt-BR')}
+                  </span>
+                </div>
+
+                {/* Lista de Cards da Coluna */}
+                <div className="p-3 space-y-3 flex-1 overflow-y-auto max-h-[68vh] min-h-[140px]">
+                  {stageOpps.map((opp) => (
+                    <div
+                      key={opp.id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', opp.id);
+                      }}
+                      className="p-3.5 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.22)] cursor-grab active:cursor-grabbing transition-all group shadow-sm flex flex-col justify-between space-y-2.5"
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-1.5 mb-1">
+                          <span className="text-xs font-semibold text-[#E7ECE8] font-heading leading-snug">
+                            {opp.company_name}
+                          </span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Badge temperature={opp.temperature} className="text-[9px] py-0 px-1">
+                              {opp.score}
+                            </Badge>
+                            <button
+                              type="button"
+                              onClick={(e) => handleOpenEditModal(opp, e)}
+                              className="p-1 rounded-lg bg-[#07100F]/70 hover:bg-[#163832] text-[#9BA6A0] hover:text-[#F1F9A1] transition-colors"
+                              title="Editar lead / oportunidade"
+                            >
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                            {deletingOppId === opp.id ? (
+                              <div className="flex items-center gap-1 bg-red-500/15 border border-red-500/30 rounded-lg px-1.5 py-0.5">
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDeleteOpp(opp.id, e)}
+                                  className="text-[9px] font-semibold text-red-400 hover:text-red-300"
+                                >
+                                  Excluir
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeletingOppId(null);
+                                  }}
+                                  className="text-[9px] text-[#9BA6A0] hover:text-[#E7ECE8]"
+                                >
+                                  Não
+                                </button>
+                              </div>
+                            ) : (
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setDeletingOppId(null);
+                                  setDeletingOppId(opp.id);
                                 }}
-                                className="text-[9px] text-[#9BA6A0] hover:text-[#E7ECE8]"
+                                className="p-1 rounded-lg bg-[#07100F]/70 hover:bg-red-500/20 text-[#65706A] hover:text-red-400 transition-colors"
+                                title="Excluir do Pipeline"
                               >
-                                Não
+                                <Trash2 className="w-3 h-3" />
                               </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeletingOppId(opp.id);
-                              }}
-                              className="p-1 rounded-lg bg-[#07100F]/70 hover:bg-red-500/20 text-[#65706A] hover:text-red-400 transition-colors"
-                              title="Excluir do Pipeline"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          )}
+                            )}
+                          </div>
+                        </div>
+
+                        <p className="text-[11px] text-[#9BA6A0] leading-snug truncate">
+                          {opp.title}
+                        </p>
+
+                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-[rgba(218,241,222,0.04)]">
+                          <span className="text-xs font-semibold font-mono text-[#F1F9A1]">
+                            R$ {(opp.estimated_value || 0).toLocaleString('pt-BR')}
+                          </span>
+                          <span className="text-[10px] text-[#65706A]">
+                            {opp.probability}% prob.
+                          </span>
                         </div>
                       </div>
 
-                      <p className="text-[11px] text-[#9BA6A0] leading-snug truncate">
-                        {opp.title}
-                      </p>
-
-                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-[rgba(218,241,222,0.04)]">
-                        <span className="text-xs font-semibold font-mono text-[#F1F9A1]">
-                          R$ {(opp.estimated_value || 0).toLocaleString('pt-BR')}
-                        </span>
-                        <span className="text-[10px] text-[#65706A]">
-                          {opp.probability}% prob.
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Indicador de Regra 24h para Proposta */}
-                    {stage.slug === 'proposta' && (
-                      <div className="flex items-center gap-1.5 text-[10px] text-[#F1F9A1] bg-[#F1F9A1]/10 px-2 py-1 rounded-md border border-[#F1F9A1]/20 font-mono">
-                        <Clock className="w-3 h-3 text-[#F1F9A1] shrink-0" />
-                        <span>
-                          {(() => {
-                            const entered = opp.stage_entered_at ? new Date(opp.stage_entered_at).getTime() : Date.now();
-                            const elapsedHours = Math.floor((Date.now() - entered) / (1000 * 60 * 60));
-                            const remaining = Math.max(0, 24 - elapsedHours);
-                            return remaining > 0 ? `${remaining}h restantes para Follow-up` : 'Regra 24h: Indo para Follow-up';
-                          })()}
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Indicador de Checklist Automático em Tarefas */}
-                    {stage.slug === 'projeto_em_andamento' && (
-                      <Link
-                        href="/tarefas"
-                        className="flex items-center justify-between gap-1.5 text-[10px] text-[#8EB69B] bg-[#8EB69B]/10 hover:bg-[#8EB69B]/15 px-2 py-1 rounded-md border border-[#8EB69B]/20 font-mono transition-colors"
-                      >
-                        <span>Checklist de 4 etapas em Tarefas</span>
-                        <span>→</span>
-                      </Link>
-                    )}
-
-                    {/* Indicador de Sincronização em Fechado */}
-                    {stage.slug === 'fechado' && (
-                      <div className="flex items-center gap-1.5 text-[10px] text-[#8EB69B] bg-[#8EB69B]/10 px-2 py-1 rounded-md border border-[#8EB69B]/20 font-mono">
-                        <span>✓ Sincronizado: Clientes &amp; Finanças</span>
-                      </div>
-                    )}
-
-                    {opp.services && opp.services.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {opp.services.map((s, idx) => (
-                          <span
-                            key={idx}
-                            className="text-[9px] px-1.5 py-0.5 rounded bg-[#07100F] text-[#9BA6A0] border border-[rgba(218,241,222,0.04)] truncate max-w-[130px]"
-                          >
-                            {s}
+                      {stage.slug === 'proposta' && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-[#F1F9A1] bg-[#F1F9A1]/10 px-2 py-1 rounded-md border border-[#F1F9A1]/20 font-mono">
+                          <Clock className="w-3 h-3 text-[#F1F9A1] shrink-0" />
+                          <span>
+                            {(() => {
+                              const entered = opp.stage_entered_at ? new Date(opp.stage_entered_at).getTime() : Date.now();
+                              const elapsedHours = Math.floor((Date.now() - entered) / (1000 * 60 * 60));
+                              const remaining = Math.max(0, 24 - elapsedHours);
+                              return remaining > 0 ? `${remaining}h restantes para Follow-up` : 'Regra 24h: Indo para Follow-up';
+                            })()}
                           </span>
-                        ))}
+                        </div>
+                      )}
+
+                      {stage.slug === 'projeto_em_andamento' && (
+                        <Link
+                          href="/tarefas"
+                          className="flex items-center justify-between gap-1.5 text-[10px] text-[#8EB69B] bg-[#8EB69B]/10 hover:bg-[#8EB69B]/15 px-2 py-1 rounded-md border border-[#8EB69B]/20 font-mono transition-colors"
+                        >
+                          <span>Checklist de 4 etapas em Tarefas</span>
+                          <span>→</span>
+                        </Link>
+                      )}
+
+                      {stage.slug === 'fechado' && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-[#8EB69B] bg-[#8EB69B]/10 px-2 py-1 rounded-md border border-[#8EB69B]/20 font-mono">
+                          <span>✓ Sincronizado: Clientes &amp; Finanças</span>
+                        </div>
+                      )}
+
+                      {opp.services && opp.services.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {opp.services.map((s, idx) => (
+                            <span
+                              key={idx}
+                              className="text-[9px] px-1.5 py-0.5 rounded bg-[#07100F] text-[#9BA6A0] border border-[rgba(218,241,222,0.04)] truncate max-w-[130px]"
+                            >
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {opp.n8n_automated && (
+                        <div className="flex items-center gap-1 text-[10px] text-[#8EB69B] font-mono">
+                          <Zap className="w-3 h-3 text-[#8EB69B]" />
+                          <span>Automação n8n ativa</span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between pt-1 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => moveStage(opp.id, 'prev')}
+                          disabled={stageIndex === 0}
+                          className="p-1 rounded text-[#65706A] hover:text-[#E7ECE8] disabled:opacity-20 hover:bg-[#07100F] transition-all"
+                          title="Etapa anterior"
+                        >
+                          <ArrowLeft className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleOpenEditModal(opp, e)}
+                          className="text-[10px] text-[#8EB69B] hover:text-[#F1F9A1] transition-colors font-medium"
+                        >
+                          Editar lead
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => moveStage(opp.id, 'next')}
+                          disabled={stageIndex === STAGES.length - 1}
+                          className="p-1 rounded text-[#65706A] hover:text-[#E7ECE8] disabled:opacity-20 hover:bg-[#07100F] transition-all"
+                          title="Próxima etapa"
+                        >
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                    )}
-
-                    {opp.n8n_automated && (
-                      <div className="flex items-center gap-1 text-[10px] text-[#8EB69B] font-mono">
-                        <Zap className="w-3 h-3 text-[#8EB69B]" />
-                        <span>Automação n8n ativa</span>
-                      </div>
-                    )}
-
-                    {/* Controles de Transição de Etapa e Edição */}
-                    <div className="flex items-center justify-between pt-1 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => moveStage(opp.id, 'prev')}
-                        disabled={stageIndex === 0}
-                        className="p-1 rounded text-[#65706A] hover:text-[#E7ECE8] disabled:opacity-20 hover:bg-[#07100F] transition-all"
-                        title="Etapa anterior"
-                      >
-                        <ArrowLeft className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={(e) => handleOpenEditModal(opp, e)}
-                        className="text-[10px] text-[#8EB69B] hover:text-[#F1F9A1] transition-colors font-medium"
-                      >
-                        Editar lead
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => moveStage(opp.id, 'next')}
-                        disabled={stageIndex === STAGES.length - 1}
-                        className="p-1 rounded text-[#65706A] hover:text-[#E7ECE8] disabled:opacity-20 hover:bg-[#07100F] transition-all"
-                        title="Próxima etapa"
-                      >
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
                     </div>
-                  </div>
-                ))}
+                  ))}
 
-                {stageOpps.length === 0 && (
-                  <div className="h-24 flex items-center justify-center text-[11px] text-[#65706A] border border-dashed border-[rgba(218,241,222,0.04)] rounded-xl">
-                    Arraste cards para cá
-                  </div>
-                )}
+                  {stageOpps.length === 0 && (
+                    <div className="h-24 flex items-center justify-center text-[11px] text-[#65706A] border border-dashed border-[rgba(218,241,222,0.04)] rounded-xl">
+                      Arraste cards para cá
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Modal Editar Lead / Oportunidade no Pipeline */}
       <Modal
@@ -659,4 +976,3 @@ export default function PipelinePage() {
     </div>
   );
 }
-
