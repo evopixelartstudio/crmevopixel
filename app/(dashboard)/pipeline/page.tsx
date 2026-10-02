@@ -212,7 +212,6 @@ export default function PipelinePage() {
   const [selectedStageFilter, setSelectedStageFilter] = useState<string>('todos');
   const [searchTerm, setSearchTerm] = useState('');
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
-  const [isOverDiscardZone, setIsOverDiscardZone] = useState<boolean>(false);
 
   // Filtros na listagem de Oportunidades Perdidas
   const [lostSearchTerm, setLostSearchTerm] = useState('');
@@ -1030,21 +1029,23 @@ export default function PipelinePage() {
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[#58A6FF]' : ''}`} />
           </button>
 
-          {/* Botão em destaque no topo: "Ver Oportunidades Perdidas" */}
+          {/* Botão no topo: Ícone na paleta padrão do sistema */}
           <button
             type="button"
             onClick={() => setShowLostView(!showLostView)}
-            className={`px-3.5 py-2 rounded-xl text-xs font-heading font-medium flex items-center gap-2 border transition-all ${
+            className={`relative p-2 rounded-xl border transition-all ${
               showLostView
-                ? 'bg-red-500/20 text-red-200 border-red-500/40 shadow-sm'
-                : 'bg-[#0D1117] text-[#C9D1D9] border-[#30363D] hover:bg-[#161B22] hover:text-white'
+                ? 'bg-[#10201E] text-[#F1F9A1] border-[rgba(241,249,161,0.3)] shadow-sm'
+                : 'bg-[#0C1A19] text-[#8EB69B] border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.22)] hover:text-[#E7ECE8]'
             }`}
+            title={showLostView ? 'Voltar ao Funil Ativo' : `Ver Oportunidades Perdidas (${lostOpportunities.length})`}
           >
-            <Archive className="w-4 h-4 text-red-400" />
-            <span>Ver Oportunidades Perdidas</span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-[#161B22] text-red-300 border border-red-500/20">
-              {lostOpportunities.length}
-            </span>
+            <Archive className="w-4 h-4" />
+            {lostOpportunities.length > 0 && (
+              <span className="absolute -top-1 -right-1 px-1.5 py-0.2 rounded-full text-[9px] font-mono bg-[#10201E] text-[#F1F9A1] border border-[rgba(241,249,161,0.25)]">
+                {lostOpportunities.length}
+              </span>
+            )}
           </button>
 
           {!showLostView && (
@@ -1137,53 +1138,6 @@ export default function PipelinePage() {
       {/* ========================================================================= */}
       {!showLostView && (
         <>
-          {/* Zona de Descarte Visual para Arrastar Cards */}
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              if (!isOverDiscardZone) setIsOverDiscardZone(true);
-            }}
-            onDragLeave={() => setIsOverDiscardZone(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setIsOverDiscardZone(false);
-              const oppId = e.dataTransfer.getData('text/plain');
-              if (oppId) {
-                const opp = opportunities.find((o) => o.id === oppId);
-                if (opp) handleOpenLostModal(opp);
-              }
-            }}
-            className={`w-full p-3.5 rounded-2xl border-2 border-dashed transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-              isOverDiscardZone
-                ? 'bg-red-500/20 border-red-500 scale-[1.01] shadow-lg shadow-red-500/10'
-                : 'bg-[#0D1117]/60 border-[#30363D] hover:border-red-500/40 hover:bg-red-500/5'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <div
-                className={`p-2.5 rounded-xl transition-all ${
-                  isOverDiscardZone
-                    ? 'bg-red-500 text-white animate-pulse'
-                    : 'bg-red-500/10 text-red-400'
-                }`}
-              >
-                <UserX className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-xs font-semibold text-red-300 font-heading">
-                  Zona de Descarte / Oportunidade Perdida
-                </div>
-                <div className="text-[11px] text-[#8B949E] mt-0.5">
-                  Arraste um card até aqui ou use o botão <strong>"Marcar como Perdido"</strong> no card para arquivar
-                </div>
-              </div>
-            </div>
-
-            <span className="text-[10px] font-mono uppercase tracking-wider px-2.5 py-1 rounded-lg bg-[#161B22] border border-[#30363D] text-red-300 self-end sm:self-center">
-              Solte para Descartar
-            </span>
-          </div>
-
           {/* MODO KANBAN: Leads Perdidos Removidos da Listagem Ativa das Colunas */}
           {viewMode === 'kanban' && stages.length > 0 && (
             <div className="flex flex-col space-y-5 pb-6 pt-1">
@@ -1323,107 +1277,59 @@ export default function PipelinePage() {
                                     )}
                                   </div>
 
-                                  {/* Canais Rápidos: WhatsApp, Instagram e Maps */}
-                                  <div className="flex items-center gap-1.5 mt-2.5 pt-2 border-t border-[rgba(218,241,222,0.04)]">
-                                    <button
-                                      type="button"
-                                      onClick={(e) => handleOppWhatsApp(opp, e)}
-                                      className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
-                                        hasPhone
-                                          ? 'bg-[#07100F]/70 hover:bg-[#163832] border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8]'
-                                          : 'bg-[#07100F]/40 border-[rgba(218,241,222,0.05)] text-[#65706A]'
-                                      }`}
-                                      title="WhatsApp"
-                                    >
-                                      <WhatsAppIcon className="w-3.5 h-3.5 fill-current" />
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={(e) => handleOppInstagram(opp, e)}
-                                      className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
-                                        hasInstagram
-                                          ? 'bg-[#07100F]/70 hover:bg-[#163832] border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8]'
-                                          : 'bg-[#07100F]/40 border-[rgba(218,241,222,0.05)] text-[#65706A]'
-                                      }`}
-                                      title="Instagram"
-                                    >
-                                      <Instagram className="w-3.5 h-3.5" />
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={(e) => handleOppMaps(opp, e)}
-                                      className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
-                                        hasMaps
-                                          ? 'bg-[#07100F]/70 hover:bg-[#163832] border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8]'
-                                          : 'bg-[#07100F]/40 border-[rgba(218,241,222,0.05)] text-[#65706A]'
-                                      }`}
-                                      title="Google Maps"
-                                    >
-                                      <MapPin className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-
-                                  {/* Fechamento de Proposta & Link Mercado Pago */}
-                                  <div className="mt-2.5 pt-2 border-t border-[rgba(218,241,222,0.06)] space-y-1.5">
-                                    <div className="flex items-center justify-between text-[10px]">
-                                      <span className="text-[#8EB69B] flex items-center gap-1 font-medium">
-                                        <CreditCard className="w-3 h-3 text-[#F1F9A1]" />
-                                        Mercado Pago:
-                                      </span>
-                                      {opp.payment_link ? (
-                                        <span
-                                          className="font-mono text-[#F1F9A1] bg-[#07100F] px-1.5 py-0.5 rounded border border-[rgba(218,241,222,0.12)] truncate max-w-[125px]"
-                                          title={opp.payment_link}
-                                        >
-                                          {opp.payment_link.replace(/^https?:\/\//, '')}
-                                        </span>
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          onClick={(e) => handleOpenEditModal(opp, e)}
-                                          className="text-[#8EB69B] hover:text-[#F1F9A1] hover:underline flex items-center gap-0.5 transition-colors"
-                                        >
-                                          <Plus className="w-2.5 h-2.5" /> Inserir Link
-                                        </button>
-                                      )}
-                                    </div>
-
-                                    {/* Botões Rápidos: Copiar Proposta e Enviar no WhatsApp */}
-                                    <div className="grid grid-cols-2 gap-1.5">
+                                  {/* Canais Rápidos & Ações Rápidas (WhatsApp, Instagram, Maps, Marcar como Perdido) */}
+                                  <div className="flex items-center justify-between gap-1.5 mt-2.5 pt-2 border-t border-[rgba(218,241,222,0.04)]">
+                                    <div className="flex items-center gap-1.5">
                                       <button
                                         type="button"
-                                        onClick={(e) => handleCopyProposal(opp, e)}
-                                        className="py-1.5 px-2 rounded-lg bg-[#07100F] hover:bg-[#163832] border border-[rgba(218,241,222,0.1)] hover:border-[#8EB69B]/40 text-[#8EB69B] hover:text-[#E7ECE8] text-[10px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 group/btn"
-                                        title="Copiar texto da proposta formatado com link de pagamento"
+                                        onClick={(e) => handleOppWhatsApp(opp, e)}
+                                        className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
+                                          hasPhone
+                                            ? 'bg-[#07100F]/70 hover:bg-[#163832] border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8]'
+                                            : 'bg-[#07100F]/40 border-[rgba(218,241,222,0.05)] text-[#65706A]'
+                                        }`}
+                                        title="WhatsApp"
                                       >
-                                        <Copy className="w-3 h-3 text-[#8EB69B] group-hover/btn:text-[#F1F9A1] shrink-0" />
-                                        <span className="truncate">Copiar Proposta</span>
+                                        <WhatsAppIcon className="w-3.5 h-3.5 fill-current" />
                                       </button>
 
                                       <button
                                         type="button"
-                                        onClick={(e) => handleOpenWhatsAppProposal(opp, e)}
-                                        className="py-1.5 px-2 rounded-lg bg-[#163832]/80 hover:bg-[#163832] border border-[#8EB69B]/40 hover:border-[#8EB69B] text-[#E7ECE8] text-[10px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 group/wa"
-                                        title="Abrir WhatsApp direto do lead com a proposta e link pré-preenchidos"
+                                        onClick={(e) => handleOppInstagram(opp, e)}
+                                        className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
+                                          hasInstagram
+                                            ? 'bg-[#07100F]/70 hover:bg-[#163832] border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8]'
+                                            : 'bg-[#07100F]/40 border-[rgba(218,241,222,0.05)] text-[#65706A]'
+                                        }`}
+                                        title="Instagram"
                                       >
-                                        <WhatsAppIcon className="w-3 h-3 fill-[#8EB69B] group-hover/wa:fill-[#F1F9A1] shrink-0" />
-                                        <span className="truncate">Enviar WhatsApp</span>
+                                        <Instagram className="w-3.5 h-3.5" />
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleOppMaps(opp, e)}
+                                        className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
+                                          hasMaps
+                                            ? 'bg-[#07100F]/70 hover:bg-[#163832] border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8]'
+                                            : 'bg-[#07100F]/40 border-[rgba(218,241,222,0.05)] text-[#65706A]'
+                                        }`}
+                                        title="Google Maps"
+                                      >
+                                        <MapPin className="w-3.5 h-3.5" />
                                       </button>
                                     </div>
-                                  </div>
 
-                                  {/* BOTÃO EXPLÍCITO DENTRO DE CADA CARD DO KANBAN: "Marcar como Perdido" */}
-                                  <button
-                                    type="button"
-                                    onClick={(e) => handleOpenLostModal(opp, e)}
-                                    className="w-full mt-2.5 py-1.5 px-2 rounded-lg bg-[#0D1117] hover:bg-red-500/15 border border-[#30363D] hover:border-red-500/40 text-[11px] text-[#8B949E] hover:text-red-300 flex items-center justify-center gap-1.5 transition-all group/btn"
-                                    title="Marcar oportunidade como perdida"
-                                  >
-                                    <UserX className="w-3.5 h-3.5 text-[#8B949E] group-hover/btn:text-red-400" />
-                                    <span>Marcar como Perdido</span>
-                                  </button>
+                                    {/* Botão Ícone Compacto: Marcar como Perdido */}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleOpenLostModal(opp, e)}
+                                      className="p-1.5 rounded-lg border border-[rgba(218,241,222,0.08)] bg-[#07100F]/60 hover:bg-red-500/15 hover:border-red-500/30 text-[#9BA6A0] hover:text-red-400 transition-all active:scale-95 flex items-center justify-center"
+                                      title="Marcar como Perdido"
+                                    >
+                                      <UserX className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
 
                                   {/* Confirmação de exclusão */}
                                   {deletingOppId === opp.id && (

@@ -1,873 +1,1165 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import Link from 'next/link';
-import { crmService } from '@/lib/services/crm-service';
-import { useCrmSync } from '@/lib/hooks/useCrmSync';
-import { Lead } from '@/types/database';
-import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { Modal } from '@/components/ui/Modal';
-import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
-import { openWhatsApp, cleanPhoneNumber } from '@/lib/utils/whatsapp';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  MessageSquare,
-  Search,
-  Send,
-  Sparkles,
-  QrCode,
-  Check,
-  CheckCheck,
-  Phone,
-  ArrowUpRight,
-  Kanban,
-  User,
-  Paperclip,
-  Smile,
-  RefreshCw,
+  MousePointer,
+  Square,
+  ArrowRight,
+  PenTool,
+  Eraser,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
   Plus,
-  Wifi,
-  WifiOff,
-  Clock,
-  ExternalLink,
-  ChevronRight,
-  ChevronDown,
-  Info,
+  Trash2,
+  Copy,
+  Download,
+  Upload,
+  RefreshCw,
+  Palette,
+  Check,
+  X,
+  Type,
+  Move,
+  Sparkles,
+  Link2,
 } from 'lucide-react';
 
-interface ChatMessage {
+export interface BoardCard {
   id: string;
-  sender: 'user' | 'contact';
-  text: string;
-  time: string;
-  status?: 'sent' | 'delivered' | 'read';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  title: string;
+  content: string;
+  color: string;
+  textColor?: string;
 }
 
-interface Conversation {
+export interface BoardConnection {
   id: string;
-  leadId?: string;
-  contactName: string;
-  companyName: string;
-  phone: string;
-  segment?: string;
-  temperature?: 'quente' | 'morno' | 'frio' | 'desqualificado';
-  score?: number;
-  unreadCount: number;
-  lastMessage: string;
-  lastTime: string;
-  messages: ChatMessage[];
-  isOnline?: boolean;
+  fromId: string;
+  toId: string;
+  label?: string;
+  color?: string;
 }
 
-export default function MensagensWhatsAppPage() {
-  useCrmSync();
-  const leads = crmService.getLeads();
-  const opportunities = crmService.getOpportunities();
+export interface BoardStroke {
+  id: string;
+  points: { x: number; y: number }[];
+  color: string;
+  width: number;
+}
 
-  // Estado da Conexão WhatsApp (API Não Oficial - Evolution / Baileys)
-  const [connectionStatus, setConnectionStatus] = useState<'conectado' | 'desconectado' | 'conectando'>('conectado');
-  const [instanceName, setInstanceName] = useState('evocrm-prod');
-  const [connectedNumber, setConnectedNumber] = useState('(11) 98765-4321');
-  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
-  const [qrTimer, setQrTimer] = useState(45);
+const CARD_COLORS = [
+  { name: 'Laranja / Coral', bg: '#FF9F5A', text: '#2A1202', border: '#EA8135' },
+  { name: 'Rosa Pastel', bg: '#FFB2D2', text: '#2D0A1B', border: '#F48EBA' },
+  { name: 'Azul Celeste', bg: '#77A7FF', text: '#0A1C40', border: '#538CF5' },
+  { name: 'Verde Menta', bg: '#86EFAC', text: '#062E17', border: '#4ADE80' },
+  { name: 'Amarelo Post-it', bg: '#FDE047', text: '#312A02', border: '#EAB308' },
+  { name: 'Lilás / Roxo', bg: '#C084FC', text: '#260B45', border: '#A855F7' },
+  { name: 'Evo Dark', bg: '#10201E', text: '#E7ECE8', border: '#8EB69B' },
+];
 
-  // Conversas & Chat Ativo
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeChatId, setActiveChatId] = useState<string>('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [chatFilter, setChatFilter] = useState<'todas' | 'nao_lidas' | 'quentes'>('todas');
-  const [inputText, setInputText] = useState('');
-  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
-  const [showLeadDetails, setShowLeadDetails] = useState(true);
+const PEN_COLORS = [
+  { name: 'Amarelo Evo', value: '#F1F9A1' },
+  { name: 'Verde Evo', value: '#8EB69B' },
+  { name: 'Branco', value: '#FFFFFF' },
+  { name: 'Coral', value: '#FF7B72' },
+  { name: 'Azul', value: '#58A6FF' },
+];
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+const STORAGE_KEY_CARDS = 'evocrm_board_cards_v1';
+const STORAGE_KEY_CONNECTIONS = 'evocrm_board_connections_v1';
+const STORAGE_KEY_STROKES = 'evocrm_board_strokes_v1';
 
-  // Carregar conversas a partir dos Leads do CRM
-  useEffect(() => {
-    const savedChats = localStorage.getItem('evocrm_whatsapp_chats');
-    if (savedChats) {
-      try {
-        const parsed = JSON.parse(savedChats);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setConversations(parsed);
-          setActiveChatId(parsed[0].id);
-          return;
-        }
-      } catch (e) {}
-    }
+// Modelo inicial inspirado na referência de quadro interativo (Miro)
+const INITIAL_CARDS: BoardCard[] = [
+  {
+    id: 'card-1',
+    x: 80,
+    y: 280,
+    width: 220,
+    height: 140,
+    title: 'Objetivos Comerciais',
+    content: 'Funil principal de conversão e cadência de mensagens de alta retenção.',
+    color: '#FF9F5A',
+    textColor: '#2A1202',
+  },
+  {
+    id: 'card-2',
+    x: 400,
+    y: 130,
+    width: 200,
+    height: 120,
+    title: 'Abordagem Inicial',
+    content: 'Apresentação cordial + pergunta provocativa sobre gargalos de conversão.',
+    color: '#FFB2D2',
+    textColor: '#2D0A1B',
+  },
+  {
+    id: 'card-3',
+    x: 400,
+    y: 430,
+    width: 210,
+    height: 120,
+    title: 'Oferta & Proposta',
+    content: 'Apresentação do escopo claro, prazo de entrega e condições facilitadas.',
+    color: '#77A7FF',
+    textColor: '#0A1C40',
+  },
+  {
+    id: 'card-4',
+    x: 720,
+    y: 60,
+    width: 180,
+    height: 90,
+    title: 'Qualificação Rápida',
+    content: 'Entender nicho, faturamento médio e urgência de entrega.',
+    color: '#FDE047',
+    textColor: '#312A02',
+  },
+  {
+    id: 'card-5',
+    x: 720,
+    y: 190,
+    width: 180,
+    height: 90,
+    title: 'Script WhatsApp',
+    content: 'Áudio curto ou mensagem personalizada de 3 parágrafos.',
+    color: '#FFB2D2',
+    textColor: '#2D0A1B',
+  },
+  {
+    id: 'card-6',
+    x: 720,
+    y: 370,
+    width: 190,
+    height: 90,
+    title: 'Quebra de Objeções',
+    content: 'Preço alto: mostrar ROI. Sem tempo: nós cuidamos de tudo.',
+    color: '#86EFAC',
+    textColor: '#062E17',
+  },
+  {
+    id: 'card-7',
+    x: 720,
+    y: 500,
+    width: 190,
+    height: 90,
+    title: 'Link de Entrada',
+    content: 'Link Mercado Pago com valor de entrada 50% ou Pix.',
+    color: '#77A7FF',
+    textColor: '#0A1C40',
+  },
+  {
+    id: 'card-8',
+    x: 1000,
+    y: 370,
+    width: 180,
+    height: 90,
+    title: 'Follow-up 24h',
+    content: 'Mensagem de repescagem caso o lead suma após a proposta.',
+    color: '#86EFAC',
+    textColor: '#062E17',
+  },
+];
 
-    // Criar conversas iniciais com os leads do CRM
-    const initialConversations: Conversation[] = leads.slice(0, 12).map((lead, idx) => {
-      const now = new Date();
-      const hoursAgo = idx * 2;
-      const messageTime = new Date(now.getTime() - hoursAgo * 3600000);
-      const timeStr = `${String(messageTime.getHours()).padStart(2, '0')}:${String(messageTime.getMinutes()).padStart(2, '0')}`;
+const INITIAL_CONNECTIONS: BoardConnection[] = [
+  { id: 'conn-1', fromId: 'card-1', toId: 'card-2', label: 'Inicia com' },
+  { id: 'conn-2', fromId: 'card-1', toId: 'card-3', label: 'Direciona para' },
+  { id: 'conn-3', fromId: 'card-2', toId: 'card-4', label: 'Requer' },
+  { id: 'conn-4', fromId: 'card-2', toId: 'card-5', label: 'Ação' },
+  { id: 'conn-5', fromId: 'card-3', toId: 'card-6', label: 'Se hesitar' },
+  { id: 'conn-6', fromId: 'card-3', toId: 'card-7', label: 'Fechamento' },
+  { id: 'conn-7', fromId: 'card-6', toId: 'card-8', label: 'Sem resposta' },
+];
 
-      const msgs: ChatMessage[] = [
-        {
-          id: `msg-1-${lead.id}`,
-          sender: 'user',
-          text: `Olá ${lead.name || lead.company_name}, tudo bem? Aqui é da EvoPixel. Identifiquei oportunidades para aumentar o faturamento da ${lead.company_name} através de automação comercial e presença digital otimizada. Você teria 5 minutos para conversar?`,
-          time: timeStr,
-          status: 'read',
-        },
-      ];
+export default function MensagensQuadroPage() {
+  // Dados do Quadro
+  const [cards, setCards] = useState<BoardCard[]>([]);
+  const [connections, setConnections] = useState<BoardConnection[]>([]);
+  const [strokes, setStrokes] = useState<BoardStroke[]>([]);
 
-      if (idx === 0) {
-        msgs.push({
-          id: `msg-2-${lead.id}`,
-          sender: 'contact',
-          text: 'Olá! Tudo ótimo por aqui. Tenho interesse sim, como funciona essa automação no WhatsApp?',
-          time: `${String(new Date().getHours()).padStart(2, '0')}:${String(Math.max(0, new Date().getMinutes() - 5)).padStart(2, '0')}`,
-        });
-      }
+  // Ferramenta Ativa
+  const [tool, setTool] = useState<'select' | 'card' | 'connect' | 'pen' | 'eraser'>('select');
+  const [selectedColor, setSelectedColor] = useState<string>(CARD_COLORS[0].bg);
+  const [penColor, setPenColor] = useState<string>(PEN_COLORS[0].value);
+  const [penWidth, setPenWidth] = useState<number>(3);
 
-      return {
-        id: lead.id,
-        leadId: lead.id,
-        contactName: lead.name || 'Contato Comercial',
-        companyName: lead.company_name,
-        phone: lead.whatsapp || lead.phone || '(11) 9' + Math.floor(10000000 + Math.random() * 90000000),
-        segment: lead.segment,
-        temperature: lead.temperature,
-        score: lead.score,
-        unreadCount: idx === 0 ? 1 : 0,
-        lastMessage: msgs[msgs.length - 1].text,
-        lastTime: timeStr,
-        messages: msgs,
-        isOnline: idx < 3,
-      };
-    });
+  // Zoom e Pan da Tela
+  const [zoom, setZoom] = useState<number>(1);
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 40, y: 40 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
-    if (initialConversations.length > 0) {
-      setConversations(initialConversations);
-      setActiveChatId(initialConversations[0].id);
-      localStorage.setItem('evocrm_whatsapp_chats', JSON.stringify(initialConversations));
-    }
-  }, [leads.length]);
+  // Estado para Conexão entre Cards
+  const [connectingFromId, setConnectingFromId] = useState<string | null>(null);
 
-  // Salvar no localStorage sempre que as conversas mudarem
-  const saveChats = (updated: Conversation[]) => {
-    setConversations(updated);
-    try {
-      localStorage.setItem('evocrm_whatsapp_chats', JSON.stringify(updated));
-    } catch (e) {}
+  // Estado de Arrastar Card
+  const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Estado de Rabisco (Desenho Livre)
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [currentStroke, setCurrentStroke] = useState<BoardStroke | null>(null);
+
+  // Edição de Label de Conexão
+  const [editingConnectionId, setEditingConnectionId] = useState<string | null>(null);
+  const [connectionLabelInput, setConnectionLabelInput] = useState('');
+
+  // Toast feedback
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 2500);
   };
 
-  // Scroll automático para a última mensagem
+  // Carregar dados salvos ou inicializar
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [activeChatId, conversations]);
+    try {
+      const savedCards = localStorage.getItem(STORAGE_KEY_CARDS);
+      const savedConns = localStorage.getItem(STORAGE_KEY_CONNECTIONS);
+      const savedStrokes = localStorage.getItem(STORAGE_KEY_STROKES);
 
-  // Contagem regressiva do QR Code
-  useEffect(() => {
-    if (!isQrModalOpen) return;
-    setQrTimer(45);
-    const interval = setInterval(() => {
-      setQrTimer((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isQrModalOpen]);
+      if (savedCards) {
+        setCards(JSON.parse(savedCards));
+      } else {
+        setCards(INITIAL_CARDS);
+      }
 
-  const activeChat = conversations.find((c) => c.id === activeChatId) || conversations[0];
-  const activeLead = activeChat?.leadId ? leads.find((l) => l.id === activeChat.leadId) : null;
-  const activeOpp = activeChat?.leadId ? opportunities.find((o) => o.lead_id === activeChat.leadId) : null;
+      if (savedConns) {
+        setConnections(JSON.parse(savedConns));
+      } else {
+        setConnections(INITIAL_CONNECTIONS);
+      }
 
-  // Enviar Mensagem
-  const handleSendMessage = () => {
-    if (!inputText.trim() || !activeChat) return;
+      if (savedStrokes) {
+        setStrokes(JSON.parse(savedStrokes));
+      }
+    } catch (e) {
+      setCards(INITIAL_CARDS);
+      setConnections(INITIAL_CONNECTIONS);
+    }
+  }, []);
 
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const textToSend = inputText.trim();
+  // Salvar no localStorage sempre que houver alterações
+  const saveCards = (newCards: BoardCard[]) => {
+    setCards(newCards);
+    localStorage.setItem(STORAGE_KEY_CARDS, JSON.stringify(newCards));
+  };
 
-    const newMsg: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      sender: 'user',
-      text: textToSend,
-      time: timeStr,
-      status: 'sent',
+  const saveConnections = (newConns: BoardConnection[]) => {
+    setConnections(newConns);
+    localStorage.setItem(STORAGE_KEY_CONNECTIONS, JSON.stringify(newConns));
+  };
+
+  const saveStrokes = (newStrokes: BoardStroke[]) => {
+    setStrokes(newStrokes);
+    localStorage.setItem(STORAGE_KEY_STROKES, JSON.stringify(newStrokes));
+  };
+
+  // Converter coordenadas da tela (mouse) para o canvas com zoom e pan
+  const screenToCanvas = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!containerRef.current) return { x: 0, y: 0 };
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = (clientX - rect.left - pan.x) / zoom;
+      const y = (clientY - rect.top - pan.y) / zoom;
+      return { x, y };
+    },
+    [pan, zoom]
+  );
+
+  // Adicionar novo card
+  const handleAddCard = (customX?: number, customY?: number) => {
+    const x = customX !== undefined ? customX : (window.innerWidth / 2 - pan.x) / zoom - 100;
+    const y = customY !== undefined ? customY : (window.innerHeight / 2 - pan.y) / zoom - 60;
+
+    const matchedPalette = CARD_COLORS.find((c) => c.bg === selectedColor) || CARD_COLORS[0];
+
+    const newCard: BoardCard = {
+      id: `card-${Date.now()}`,
+      x: Math.round(x),
+      y: Math.round(y),
+      width: 210,
+      height: 130,
+      title: 'Nova Mensagem',
+      content: 'Escreva livremente aqui sua mensagem, argumento ou script de vendas...',
+      color: matchedPalette.bg,
+      textColor: matchedPalette.text,
     };
 
-    // Registrar no CRM Service
-    if (activeChat.leadId) {
-      crmService.addMessageLog({
-        lead_id: activeChat.leadId,
-        channel: 'whatsapp',
-        sent_text: textToSend,
-        direction: 'enviada',
-        sent_at: new Date().toISOString(),
-        source: 'manual',
-        status: 'entregue',
+    const updated = [...cards, newCard];
+    saveCards(updated);
+    showToast('Card adicionado ao quadro!');
+  };
+
+  // Duplicar card
+  const handleDuplicateCard = (card: BoardCard, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newCard: BoardCard = {
+      ...card,
+      id: `card-${Date.now()}`,
+      x: card.x + 30,
+      y: card.y + 30,
+      title: `${card.title} (Cópia)`,
+    };
+    saveCards([...cards, newCard]);
+    showToast('Card duplicado com sucesso!');
+  };
+
+  // Excluir card e conexões associadas
+  const handleDeleteCard = (cardId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updatedCards = cards.filter((c) => c.id !== cardId);
+    const updatedConns = connections.filter((conn) => conn.fromId !== cardId && conn.toId !== cardId);
+    saveCards(updatedCards);
+    saveConnections(updatedConns);
+    showToast('Card excluído do quadro.');
+  };
+
+  // Alterar cor de um card específico
+  const handleChangeCardColor = (cardId: string, bg: string, textColor: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = cards.map((c) => (c.id === cardId ? { ...c, color: bg, textColor } : c));
+    saveCards(updated);
+  };
+
+  // Iniciar ou completar conexão entre cards
+  const handleCardConnectClick = (cardId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (tool !== 'connect' && !connectingFromId) {
+      setConnectingFromId(cardId);
+      setTool('connect');
+      showToast('Selecione o segundo card para conectar');
+      return;
+    }
+
+    if (!connectingFromId) {
+      setConnectingFromId(cardId);
+      showToast('Selecione o segundo card para concluir a ligação');
+      return;
+    }
+
+    if (connectingFromId === cardId) {
+      setConnectingFromId(null);
+      showToast('Conexão cancelada.');
+      return;
+    }
+
+    // Criar nova conexão
+    const newConn: BoardConnection = {
+      id: `conn-${Date.now()}`,
+      fromId: connectingFromId,
+      toId: cardId,
+      label: 'Conexão',
+    };
+
+    saveConnections([...connections, newConn]);
+    setConnectingFromId(null);
+    setTool('select');
+    showToast('Cards conectados com sucesso!');
+  };
+
+  // Excluir conexão
+  const handleDeleteConnection = (connId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = connections.filter((c) => c.id !== connId);
+    saveConnections(updated);
+    setEditingConnectionId(null);
+    showToast('Conexão removida.');
+  };
+
+  // Atualizar label da conexão
+  const handleSaveConnectionLabel = (connId: string) => {
+    const updated = connections.map((c) =>
+      c.id === connId ? { ...c, label: connectionLabelInput.trim() || undefined } : c
+    );
+    saveConnections(updated);
+    setEditingConnectionId(null);
+    showToast('Etiqueta da conexão atualizada!');
+  };
+
+  // Reiniciar quadro com o modelo padrão
+  const handleResetBoard = () => {
+    if (window.confirm('Deseja restaurar o modelo inicial com os cards e conexões? Todas as alterações serão substituídas.')) {
+      saveCards(INITIAL_CARDS);
+      saveConnections(INITIAL_CONNECTIONS);
+      saveStrokes([]);
+      setPan({ x: 40, y: 40 });
+      setZoom(1);
+      showToast('Quadro restaurado com sucesso!');
+    }
+  };
+
+  // Limpar todo o quadro
+  const handleClearBoard = () => {
+    if (window.confirm('Tem certeza de que deseja limpar completamente este quadro?')) {
+      saveCards([]);
+      saveConnections([]);
+      saveStrokes([]);
+      showToast('Quadro limpo.');
+    }
+  };
+
+  // Limpar apenas rabiscos
+  const handleClearStrokes = () => {
+    saveStrokes([]);
+    showToast('Rabiscos apagados.');
+  };
+
+  // Exportar quadro como JSON
+  const handleExportJSON = () => {
+    const data = {
+      cards,
+      connections,
+      strokes,
+      exportedAt: new Date().toISOString(),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `evopixel-quadro-mensagens-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Arquivo do quadro exportado!');
+  };
+
+  // Manipulação de Mouse / Toque no Canvas
+  const handleMouseDown = (e: React.MouseEvent) => {
+    // Clique com botão do meio ou modo de seleção em área vazia -> Pan
+    if (e.button === 1 || (tool === 'select' && e.target === containerRef.current)) {
+      setIsPanning(true);
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+      return;
+    }
+
+    // Modo Card -> Criar card no local do clique
+    if (tool === 'card') {
+      const pos = screenToCanvas(e.clientX, e.clientY);
+      handleAddCard(pos.x - 100, pos.y - 60);
+      setTool('select');
+      return;
+    }
+
+    // Modo Pen -> Iniciar rabisco
+    if (tool === 'pen') {
+      const pos = screenToCanvas(e.clientX, e.clientY);
+      setIsDrawing(true);
+      setCurrentStroke({
+        id: `stroke-${Date.now()}`,
+        points: [pos],
+        color: penColor,
+        width: penWidth,
       });
+      return;
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    // Pan do canvas
+    if (isPanning) {
+      setPan({
+        x: e.clientX - panStart.x,
+        y: e.clientY - panStart.y,
+      });
+      return;
     }
 
-    const updated = conversations.map((conv) => {
-      if (conv.id === activeChat.id) {
-        return {
-          ...conv,
-          lastMessage: textToSend,
-          lastTime: timeStr,
-          messages: [...conv.messages, newMsg],
-        };
-      }
-      return conv;
-    });
+    // Arrastar Card
+    if (draggingCardId) {
+      const pos = screenToCanvas(e.clientX, e.clientY);
+      const newX = Math.round(pos.x - dragOffset.x);
+      const newY = Math.round(pos.y - dragOffset.y);
 
-    saveChats(updated);
-    setInputText('');
-
-    // Atualiza status para entregue após 600ms
-    setTimeout(() => {
-      setConversations((prev) =>
-        prev.map((conv) => {
-          if (conv.id === activeChat.id) {
-            return {
-              ...conv,
-              messages: conv.messages.map((m) =>
-                m.id === newMsg.id ? { ...m, status: 'delivered' } : m
-              ),
-            };
-          }
-          return conv;
-        })
+      setCards((prev) =>
+        prev.map((c) => (c.id === draggingCardId ? { ...c, x: newX, y: newY } : c))
       );
-    }, 600);
+      return;
+    }
 
-    // Resposta simulada para manter interatividade se o contato for um lead ativo
-    if (connectionStatus === 'conectado') {
-      setTimeout(() => {
-        const replyTime = new Date();
-        const replyTimeStr = `${String(replyTime.getHours()).padStart(2, '0')}:${String(replyTime.getMinutes()).padStart(2, '0')}`;
-        const autoResponses = [
-          'Perfeito! Vamos marcar uma demonstração sim.',
-          'Entendido! Pode me enviar uma proposta com os valores?',
-          'Vou alinhar com meu sócio e te retorno ainda hoje.',
-          'Obrigado pelo retorno rápido, achei a ideia muito boa.',
-        ];
-        const randomReply = autoResponses[Math.floor(Math.random() * autoResponses.length)];
-
-        const replyMsg: ChatMessage = {
-          id: `reply-${Date.now()}`,
-          sender: 'contact',
-          text: randomReply,
-          time: replyTimeStr,
-        };
-
-        setConversations((prev) => {
-          const next = prev.map((conv) => {
-            if (conv.id === activeChat.id) {
-              return {
-                ...conv,
-                lastMessage: randomReply,
-                lastTime: replyTimeStr,
-                unreadCount: 0,
-                messages: conv.messages.map((m) => (m.id === newMsg.id ? { ...m, status: 'read' } : m)).concat(replyMsg),
-              };
-            }
-            return conv;
-          });
-          localStorage.setItem('evocrm_whatsapp_chats', JSON.stringify(next));
-          return next;
-        });
-      }, 2500);
+    // Desenhar Rabisco
+    if (isDrawing && currentStroke) {
+      const pos = screenToCanvas(e.clientX, e.clientY);
+      setCurrentStroke((prev) => (prev ? { ...prev, points: [...prev.points, pos] } : null));
+      return;
     }
   };
 
-  // Simular Conexão QR Code
-  const handleSimulateQrScan = () => {
-    setConnectionStatus('conectando');
-    setIsQrModalOpen(false);
-    setTimeout(() => {
-      setConnectionStatus('conectado');
-      setConnectedNumber('(11) 98765-4321');
-      alert('WhatsApp conectado com sucesso via Evolution API (Sessão evocrm-prod)!');
-    }, 1500);
+  const handleMouseUp = () => {
+    if (isPanning) {
+      setIsPanning(false);
+    }
+
+    if (draggingCardId) {
+      // Salvar estado final no localStorage
+      saveCards(cards);
+      setDraggingCardId(null);
+    }
+
+    if (isDrawing && currentStroke) {
+      if (currentStroke.points.length > 1) {
+        saveStrokes([...strokes, currentStroke]);
+      }
+      setIsDrawing(false);
+      setCurrentStroke(null);
+    }
   };
 
-  // Templates de Abordagem Rápida
-  const QUICK_TEMPLATES = [
-    {
-      title: 'Presença Digital & Site Oficial',
-      text: `Olá ${activeChat?.contactName || ''}! Notei que a ${activeChat?.companyName || 'sua empresa'} tem excelente atuação na região, mas ainda não possui um portal institucional otimizado para o Google. Podemos conversar 5 minutinhos sobre como criar um canal de vendas oficial?`,
-    },
-    {
-      title: 'Automação Comercial WhatsApp (24h)',
-      text: `Olá ${activeChat?.contactName || ''}! Passando para compartilhar um dado rápido: empresas do seu nicho perdem até 40% das vendas por demora na resposta no WhatsApp. Estruturamos fluxos de triagem e agendamento instantâneo. Faz sentido avaliar?`,
-    },
-    {
-      title: 'Follow-up de Proposta',
-      text: `Olá ${activeChat?.contactName || ''}! Tudo bem? Gostaria de saber se conseguiu avaliar a proposta comercial que enviamos. Tem alguma dúvida em relação ao escopo ou aos prazos de implantação?`,
-    },
-    {
-      title: 'Confirmação de Reunião de Diagnóstico',
-      text: `Olá ${activeChat?.contactName || ''}! Confirmando nossa conversa rápida de diagnóstico para alinharmos os objetivos da ${activeChat?.companyName || 'empresa'}. Fica melhor pela manhã ou à tarde?`,
-    },
-  ];
+  // Zoom pelo scroll do mouse
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+      setZoom((prev) => Math.min(2.5, Math.max(0.3, prev * zoomFactor)));
+    }
+  };
 
-  const filteredConversations = conversations.filter((c) => {
-    const matchesQuery =
-      c.companyName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.contactName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.phone.includes(searchQuery) ||
-      c.lastMessage.toLowerCase().includes(searchQuery.toLowerCase());
+  // Calcular curva Bézier suave entre dois cards para conexões estilo Miro
+  const getCurvePath = (c1: BoardCard, c2: BoardCard) => {
+    const startX = c1.x + c1.width;
+    const startY = c1.y + c1.height / 2;
+    const endX = c2.x;
+    const endY = c2.y + c2.height / 2;
 
-    if (!matchesQuery) return false;
-    if (chatFilter === 'nao_lidas') return c.unreadCount > 0;
-    if (chatFilter === 'quentes') return c.temperature === 'quente';
-    return true;
-  });
+    const dx = Math.abs(endX - startX) * 0.55;
+    const cp1x = startX + Math.max(dx, 40);
+    const cp1y = startY;
+    const cp2x = endX - Math.max(dx, 40);
+    const cp2y = endY;
+
+    const midX = (startX + endX) / 2;
+    const midY = (startY + endY) / 2;
+
+    return {
+      d: `M ${startX} ${startY} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${endX} ${endY}`,
+      midX,
+      midY,
+    };
+  };
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-200">
-      {/* Cabeçalho de Conexão WhatsApp */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--evo-border)] pb-4">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-mono text-[#8EB69B] uppercase tracking-wider mb-1">
-            <WhatsAppIcon className="w-3.5 h-3.5 fill-[#25D366]" />
-            Comunicação em Tempo Real • API Não Oficial
+    <div className="relative w-full h-[calc(100vh-4rem)] bg-[#050706] overflow-hidden select-none flex flex-col font-sans">
+      {/* ========================================================================= */}
+      {/* 1. BARRA SUPERIOR (HEADER ESTILO MIRO / EVOCRM)                           */}
+      {/* ========================================================================= */}
+      <div className="h-14 px-4 bg-[#07100F] border-b border-[rgba(218,241,222,0.08)] flex items-center justify-between z-30 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.1)] text-[#F1F9A1]">
+            <Sparkles className="w-4 h-4" />
           </div>
-          <h1 className="text-2xl lg:text-3xl font-semibold text-[var(--evo-text)] font-heading">
-            Chat WhatsApp
-          </h1>
-          <p className="text-xs text-[var(--evo-muted)] mt-1">
-            Conecte seu WhatsApp via Evolution API / Baileys, visualize conversas ativas, digite e atenda seus leads diretamente do CRM.
-          </p>
+          <div>
+            <h1 className="text-sm font-heading font-semibold text-[#E7ECE8] flex items-center gap-2">
+              Quadro de Mensagens &amp; Funis
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#8EB69B]">
+                {cards.length} cards • {connections.length} conexões
+              </span>
+            </h1>
+            <p className="text-[11px] text-[#9BA6A0]">
+              Escreva livremente, conecte ideias, crie fluxos e rabisque no quadro.
+            </p>
+          </div>
         </div>
 
-        {/* Status de Conexão & Botões */}
-        <div className="flex items-center gap-2.5">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#0C1A19] border border-[var(--evo-border)] text-xs">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                connectionStatus === 'conectado'
-                  ? 'bg-[#25D366] animate-pulse'
-                  : connectionStatus === 'conectando'
-                  ? 'bg-amber-400 animate-spin'
-                  : 'bg-red-400'
-              }`}
-            />
-            <span className="text-[var(--evo-text)] font-medium">
-              {connectionStatus === 'conectado'
-                ? `Online: ${connectedNumber}`
-                : connectionStatus === 'conectando'
-                ? 'Conectando...'
-                : 'WhatsApp Desconectado'}
+        {/* Controles da Direita */}
+        <div className="flex items-center gap-2">
+          {/* Zoom controls */}
+          <div className="flex items-center bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] rounded-xl p-1 gap-1">
+            <button
+              type="button"
+              onClick={() => setZoom((z) => Math.max(0.3, z - 0.1))}
+              className="p-1.5 rounded-lg text-[#9BA6A0] hover:text-[#E7ECE8] hover:bg-[#10201E] transition-colors"
+              title="Diminuir Zoom"
+            >
+              <ZoomOut className="w-3.5 h-3.5" />
+            </button>
+            <span className="text-[11px] font-mono text-[#8EB69B] px-1 min-w-[40px] text-center">
+              {Math.round(zoom * 100)}%
             </span>
-            <span className="text-[10px] font-mono text-[#8EB69B] bg-[#10201E] px-1.5 py-0.5 rounded border border-[var(--evo-border)]">
-              {instanceName}
-            </span>
+            <button
+              type="button"
+              onClick={() => setZoom((z) => Math.min(2.5, z + 0.1))}
+              className="p-1.5 rounded-lg text-[#9BA6A0] hover:text-[#E7ECE8] hover:bg-[#10201E] transition-colors"
+              title="Aumentar Zoom"
+            >
+              <ZoomIn className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setZoom(1);
+                setPan({ x: 40, y: 40 });
+              }}
+              className="px-2 py-1 rounded-lg text-[10px] font-mono text-[#9BA6A0] hover:text-[#E7ECE8] hover:bg-[#10201E] transition-colors"
+              title="Ajustar 100%"
+            >
+              Reset
+            </button>
           </div>
 
-          {connectionStatus === 'conectado' ? (
-            <button
-              onClick={() => {
-                if (confirm('Deseja desconectar a sessão do WhatsApp?')) {
-                  setConnectionStatus('desconectado');
-                }
-              }}
-              className="px-3 py-1.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-300 text-xs font-medium transition-all active:scale-95"
-            >
-              Desconectar
-            </button>
-          ) : (
-            <Button
-              variant="primary"
-              size="sm"
-              className="gap-1.5 text-xs bg-[#25D366] hover:bg-[#20ba59] text-black border-none"
-              onClick={() => setIsQrModalOpen(true)}
-            >
-              <QrCode className="w-3.5 h-3.5" />
-              <span>Conectar via QR Code</span>
-            </Button>
-          )}
+          {/* Botões de Ação */}
+          <button
+            type="button"
+            onClick={handleResetBoard}
+            className="p-2 rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] text-[#9BA6A0] hover:text-[#E7ECE8] hover:border-[rgba(218,241,222,0.2)] transition-all"
+            title="Restaurar modelo inicial de exemplo"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
 
-          <Link href="/configuracoes">
-            <button
-              className="p-2 rounded-xl bg-[#10201E] hover:bg-[#163832] border border-[var(--evo-border)] text-[#8EB69B] hover:text-[#F1F9A1] transition-all text-xs"
-              title="Configurar Evolution API e Webhooks"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-            </button>
-          </Link>
+          <button
+            type="button"
+            onClick={handleExportJSON}
+            className="p-2 rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] text-[#9BA6A0] hover:text-[#E7ECE8] hover:border-[rgba(218,241,222,0.2)] transition-all"
+            title="Exportar backup do quadro (JSON)"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleAddCard()}
+            className="px-3.5 py-1.5 rounded-xl bg-[#F1F9A1] hover:bg-[#d8e08d] text-[#07100F] text-xs font-heading font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+          >
+            <Plus className="w-3.5 h-3.5 text-[#07100F]" />
+            <span>+ Novo Card</span>
+          </button>
         </div>
       </div>
 
-      {/* Janela Principal do Chat WhatsApp Web */}
-      <div className="h-[74vh] min-h-[580px] bg-[#0C1A19] border border-[var(--evo-border)] rounded-2xl overflow-hidden shadow-2xl flex">
-        {/* =====================================================================
-            COLUNA 1: LISTA DE CONVERSAS (WHATSAPP INBOX)
-            ===================================================================== */}
-        <div className="w-80 md:w-96 border-r border-[var(--evo-border)] bg-[#07100F]/90 flex flex-col shrink-0">
-          {/* Barra de Busca de Conversas */}
-          <div className="p-3 border-b border-[var(--evo-border)] space-y-2">
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 text-[#8EB69B] absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Buscar conversa, lead ou mensagem..."
-                className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-[#10201E] border border-[var(--evo-border)] text-xs text-[var(--evo-text)] placeholder-[#65706A] focus:outline-none focus:border-[#8EB69B]"
+      {/* ========================================================================= */}
+      {/* 2. BARRA LATERAL FLUTUANTE DE FERRAMENTAS (ESTILO MIRO)                    */}
+      {/* ========================================================================= */}
+      <div className="absolute left-4 top-20 z-40 flex flex-col items-center bg-[#07100F]/95 backdrop-blur-md border border-[rgba(218,241,222,0.12)] p-2 rounded-2xl shadow-2xl gap-2">
+        {/* Ferramenta: Selecionar / Mover */}
+        <button
+          type="button"
+          onClick={() => {
+            setTool('select');
+            setConnectingFromId(null);
+          }}
+          className={`p-2.5 rounded-xl transition-all relative group ${
+            tool === 'select'
+              ? 'bg-[#10201E] text-[#F1F9A1] border border-[rgba(241,249,161,0.3)] shadow-sm'
+              : 'text-[#9BA6A0] hover:text-[#E7ECE8] hover:bg-[#10201E]/60'
+          }`}
+          title="Selecionar / Mover Cards"
+        >
+          <MousePointer className="w-4 h-4" />
+          <span className="sr-only">Mover</span>
+        </button>
+
+        {/* Ferramenta: Novo Card */}
+        <button
+          type="button"
+          onClick={() => {
+            setTool('card');
+            setConnectingFromId(null);
+          }}
+          className={`p-2.5 rounded-xl transition-all relative group ${
+            tool === 'card'
+              ? 'bg-[#10201E] text-[#F1F9A1] border border-[rgba(241,249,161,0.3)] shadow-sm'
+              : 'text-[#9BA6A0] hover:text-[#E7ECE8] hover:bg-[#10201E]/60'
+          }`}
+          title="Adicionar Card de Mensagem (Clique no quadro)"
+        >
+          <Square className="w-4 h-4" />
+          <span className="sr-only">Card</span>
+        </button>
+
+        {/* Ferramenta: Conectar Cards */}
+        <button
+          type="button"
+          onClick={() => {
+            setTool('connect');
+            setConnectingFromId(null);
+            showToast('Clique no 1º card e depois no 2º para conectá-los');
+          }}
+          className={`p-2.5 rounded-xl transition-all relative group ${
+            tool === 'connect'
+              ? 'bg-[#10201E] text-[#F1F9A1] border border-[rgba(241,249,161,0.3)] shadow-sm'
+              : 'text-[#9BA6A0] hover:text-[#E7ECE8] hover:bg-[#10201E]/60'
+          }`}
+          title="Conectar Cards com Setas e Linhas"
+        >
+          <Link2 className="w-4 h-4" />
+          <span className="sr-only">Conectar</span>
+        </button>
+
+        {/* Ferramenta: Caneta / Rabiscar */}
+        <button
+          type="button"
+          onClick={() => {
+            setTool('pen');
+            setConnectingFromId(null);
+          }}
+          className={`p-2.5 rounded-xl transition-all relative group ${
+            tool === 'pen'
+              ? 'bg-[#10201E] text-[#F1F9A1] border border-[rgba(241,249,161,0.3)] shadow-sm'
+              : 'text-[#9BA6A0] hover:text-[#E7ECE8] hover:bg-[#10201E]/60'
+          }`}
+          title="Rabiscar / Desenhar Livremente no Quadro"
+        >
+          <PenTool className="w-4 h-4" />
+          <span className="sr-only">Rabiscar</span>
+        </button>
+
+        {/* Seletor de Cores de Rabisco quando a ferramenta Pen está ativa */}
+        {tool === 'pen' && (
+          <div className="pt-2 border-t border-[rgba(218,241,222,0.1)] flex flex-col items-center gap-1.5 animate-in fade-in zoom-in-95 duration-100">
+            {PEN_COLORS.map((pc) => (
+              <button
+                key={pc.value}
+                type="button"
+                onClick={() => setPenColor(pc.value)}
+                className={`w-4 h-4 rounded-full border transition-all ${
+                  penColor === pc.value ? 'scale-125 border-white ring-2 ring-white/20' : 'border-transparent'
+                }`}
+                style={{ backgroundColor: pc.value }}
+                title={pc.name}
               />
-            </div>
-
-            {/* Filtros Rápidos */}
-            <div className="flex items-center gap-1.5 text-[11px]">
-              <button
-                onClick={() => setChatFilter('todas')}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
-                  chatFilter === 'todas'
-                    ? 'bg-[#163832] text-[#F1F9A1] font-medium border border-[#8EB69B]/30'
-                    : 'text-[#9BA6A0] hover:bg-[#10201E]'
-                }`}
-              >
-                Todas ({conversations.length})
-              </button>
-              <button
-                onClick={() => setChatFilter('nao_lidas')}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
-                  chatFilter === 'nao_lidas'
-                    ? 'bg-[#163832] text-[#F1F9A1] font-medium border border-[#8EB69B]/30'
-                    : 'text-[#9BA6A0] hover:bg-[#10201E]'
-                }`}
-              >
-                Não Lidas
-              </button>
-              <button
-                onClick={() => setChatFilter('quentes')}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
-                  chatFilter === 'quentes'
-                    ? 'bg-[#163832] text-[#F1F9A1] font-medium border border-[#8EB69B]/30'
-                    : 'text-[#9BA6A0] hover:bg-[#10201E]'
-                }`}
-              >
-                🔥 Quentes
-              </button>
-            </div>
+            ))}
+            <div className="w-full h-px bg-[rgba(218,241,222,0.1)] my-1" />
+            <button
+              type="button"
+              onClick={handleClearStrokes}
+              className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors"
+              title="Limpar todos os rabiscos"
+            >
+              <Eraser className="w-3.5 h-3.5" />
+            </button>
           </div>
+        )}
 
-          {/* Lista Rolável de Chats */}
-          <div className="flex-1 overflow-y-auto divide-y divide-[var(--evo-border)]">
-            {filteredConversations.map((conv) => {
-              const isActive = conv.id === activeChat?.id;
+        <div className="w-full h-px bg-[rgba(218,241,222,0.08)] my-1" />
+
+        {/* Limpar Quadro */}
+        <button
+          type="button"
+          onClick={handleClearBoard}
+          className="p-2.5 rounded-xl text-[#9BA6A0] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+          title="Limpar Todo o Quadro"
+        >
+          <Trash2 className="w-4 h-4" />
+          <span className="sr-only">Limpar</span>
+        </button>
+      </div>
+
+      {/* Dica / Status da Ferramenta Ativa */}
+      {tool === 'connect' && (
+        <div className="absolute top-16 left-20 z-40 bg-[#10201E] border border-[rgba(241,249,161,0.3)] text-[#F1F9A1] px-3.5 py-1.5 rounded-xl text-xs font-mono shadow-xl flex items-center gap-2 animate-in fade-in">
+          <Link2 className="w-3.5 h-3.5 text-[#F1F9A1]" />
+          <span>
+            {connectingFromId
+              ? 'Card de origem selecionado. Clique no card de destino!'
+              : 'Clique no primeiro card para iniciar a linha de conexão.'}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setConnectingFromId(null);
+              setTool('select');
+            }}
+            className="p-0.5 rounded text-[#9BA6A0] hover:text-white"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {tool === 'pen' && (
+        <div className="absolute top-16 left-20 z-40 bg-[#10201E] border border-[rgba(142,182,155,0.3)] text-[#8EB69B] px-3.5 py-1.5 rounded-xl text-xs font-mono shadow-xl flex items-center gap-2 animate-in fade-in">
+          <PenTool className="w-3.5 h-3.5" />
+          <span>Modo Rabisco Ativo: Desenhe livremente com o mouse ou toque.</span>
+        </div>
+      )}
+
+      {/* Toast Notificação */}
+      {toastMsg && (
+        <div className="absolute bottom-6 right-6 z-50 bg-[#10201E] border border-[#8EB69B]/40 text-[#E7ECE8] px-4 py-2 rounded-xl text-xs font-mono shadow-2xl flex items-center gap-2 animate-in slide-in-from-bottom-2">
+          <Check className="w-3.5 h-3.5 text-[#8EB69B]" />
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 3. ÁREA DO QUADRO / CANVAS COM GRID DE PONTOS                             */}
+      {/* ========================================================================= */}
+      <div
+        ref={containerRef}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onWheel={handleWheel}
+        className={`relative flex-1 w-full h-full overflow-hidden cursor-${
+          tool === 'pen' ? 'crosshair' : tool === 'card' ? 'copy' : isPanning ? 'grabbing' : 'default'
+        }`}
+        style={{
+          backgroundColor: '#050706',
+          backgroundImage: `radial-gradient(rgba(218, 241, 222, 0.12) 1px, transparent 1px)`,
+          backgroundSize: `${24 * zoom}px ${24 * zoom}px`,
+          backgroundPosition: `${pan.x}px ${pan.y}px`,
+        }}
+      >
+        {/* CONTAINER COM ZOOM E PAN APLICADOS */}
+        <div
+          className="absolute inset-0 origin-top-left pointer-events-none"
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          }}
+        >
+          {/* ===================================================================== */}
+          {/* 3.1. CAMADA SVG: CONEXÕES, SETAS E RABISCOS                          */}
+          {/* ===================================================================== */}
+          <svg className="absolute top-0 left-0 w-[5000px] h-[5000px] overflow-visible pointer-events-none">
+            <defs>
+              <marker
+                id="arrowhead"
+                markerWidth="8"
+                markerHeight="8"
+                refX="6"
+                refY="4"
+                orient="auto"
+              >
+                <path d="M 0 0 L 8 4 L 0 8 Z" fill="#8EB69B" opacity="0.85" />
+              </marker>
+              <marker
+                id="arrowhead-active"
+                markerWidth="8"
+                markerHeight="8"
+                refX="6"
+                refY="4"
+                orient="auto"
+              >
+                <path d="M 0 0 L 8 4 L 0 8 Z" fill="#F1F9A1" />
+              </marker>
+            </defs>
+
+            {/* Linhas de Conexão entre Cards */}
+            {connections.map((conn) => {
+              const c1 = cards.find((c) => c.id === conn.fromId);
+              const c2 = cards.find((c) => c.id === conn.toId);
+              if (!c1 || !c2) return null;
+
+              const { d, midX, midY } = getCurvePath(c1, c2);
 
               return (
-                <div
-                  key={conv.id}
-                  onClick={() => {
-                    setActiveChatId(conv.id);
-                    // Marcar como lida
-                    setConversations((prev) =>
-                      prev.map((c) => (c.id === conv.id ? { ...c, unreadCount: 0 } : c))
-                    );
-                  }}
-                  className={`p-3.5 flex items-start gap-3 cursor-pointer transition-all ${
-                    isActive
-                      ? 'bg-[#10201E] border-l-4 border-l-[#F1F9A1]'
-                      : 'hover:bg-[#10201E]/50'
-                  }`}
-                >
-                  {/* Avatar com status online */}
-                  <div className="relative shrink-0">
-                    <div className="w-10 h-10 rounded-full bg-[#163832] border border-[var(--evo-border)] flex items-center justify-center text-xs font-semibold text-[#F1F9A1] font-heading">
-                      {conv.companyName.substring(0, 2).toUpperCase()}
-                    </div>
-                    {conv.isOnline && (
-                      <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-[#25D366] border-2 border-[#07100F]" />
-                    )}
-                  </div>
+                <g key={conn.id} className="pointer-events-auto group/line">
+                  {/* Linha invisível mais espessa para facilitar clique */}
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth="18"
+                    className="cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingConnectionId(conn.id);
+                      setConnectionLabelInput(conn.label || '');
+                    }}
+                  />
 
-                  {/* Informações da conversa */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1 mb-0.5">
-                      <span className="text-xs font-semibold text-[var(--evo-text)] truncate font-heading">
-                        {conv.companyName}
-                      </span>
-                      <span className="text-[10px] font-mono text-[#65706A] shrink-0">
-                        {conv.lastTime}
-                      </span>
-                    </div>
+                  {/* Linha Curva Visível */}
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke="#8EB69B"
+                    strokeWidth="2.5"
+                    strokeOpacity="0.8"
+                    markerEnd="url(#arrowhead)"
+                    className="transition-all group-hover/line:stroke-[#F1F9A1] group-hover/line:stroke-[3.5px]"
+                  />
 
-                    <div className="text-[11px] text-[#8EB69B] truncate mb-1">
-                      {conv.contactName}
-                    </div>
-
-                    <div className="flex items-center justify-between gap-1">
-                      <p className="text-[11px] text-[var(--evo-muted)] truncate flex-1 leading-tight">
-                        {conv.lastMessage}
-                      </p>
-
-                      {conv.unreadCount > 0 && (
-                        <span className="w-4 h-4 rounded-full bg-[#25D366] text-black text-[9px] font-bold flex items-center justify-center shrink-0">
-                          {conv.unreadCount}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                  {/* Etiqueta / Label da Linha de Conexão */}
+                  {conn.label && (
+                    <g
+                      transform={`translate(${midX}, ${midY})`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingConnectionId(conn.id);
+                        setConnectionLabelInput(conn.label || '');
+                      }}
+                      className="cursor-pointer"
+                    >
+                      <rect
+                        x={-(conn.label.length * 3.5 + 12)}
+                        y="-11"
+                        width={conn.label.length * 7 + 24}
+                        height="22"
+                        rx="11"
+                        fill="#0C1A19"
+                        stroke="#8EB69B"
+                        strokeWidth="1.2"
+                        opacity="0.95"
+                      />
+                      <text
+                        x="0"
+                        y="3"
+                        textAnchor="middle"
+                        fill="#E7ECE8"
+                        fontSize="11"
+                        fontFamily="ui-monospace, monospace"
+                        fontWeight="500"
+                      >
+                        {conn.label}
+                      </text>
+                    </g>
+                  )}
+                </g>
               );
             })}
 
-            {filteredConversations.length === 0 && (
-              <div className="p-8 text-center text-xs text-[var(--evo-muted)]">
-                Nenhuma conversa encontrada.
-              </div>
-            )}
-          </div>
-        </div>
+            {/* Rabiscos Salvos (Strokes) */}
+            {strokes.map((stroke) => {
+              if (stroke.points.length < 2) return null;
+              const pathData = stroke.points.reduce(
+                (acc, pt, idx) => (idx === 0 ? `M ${pt.x} ${pt.y}` : `${acc} L ${pt.x} ${pt.y}`),
+                ''
+              );
+              return (
+                <path
+                  key={stroke.id}
+                  d={pathData}
+                  fill="none"
+                  stroke={stroke.color}
+                  strokeWidth={stroke.width}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity="0.9"
+                />
+              );
+            })}
 
-        {/* =====================================================================
-            COLUNA 2: JANELA PRINCIPAL DE MENSAGENS (CHAT ATIVO)
-            ===================================================================== */}
-        {activeChat ? (
-          <div className="flex-1 flex flex-col min-w-0 bg-[#07100F]/40 relative">
-            {/* Header do Chat Ativo */}
-            <div className="h-16 px-5 border-b border-[var(--evo-border)] bg-[#07100F]/80 flex items-center justify-between gap-4 z-10">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-full bg-[#163832] border border-[var(--evo-border)] flex items-center justify-center text-xs font-semibold text-[#F1F9A1] font-heading shrink-0">
-                  {activeChat.companyName.substring(0, 2).toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-semibold text-[var(--evo-text)] font-heading truncate">
-                      {activeChat.companyName}
-                    </h2>
-                    {activeChat.temperature && (
-                      <Badge temperature={activeChat.temperature} className="text-[9px] py-0 px-1">
-                        {activeChat.temperature === 'quente' ? '🔥 Quente' : activeChat.temperature}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="text-[11px] text-[var(--evo-muted)] flex items-center gap-2 truncate">
-                    <span>{activeChat.contactName}</span>
-                    <span>•</span>
-                    <span className="font-mono text-[#8EB69B]">{activeChat.phone}</span>
-                    <span>•</span>
-                    <span className="text-[#25D366] flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#25D366]" />
-                      online
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Ações Rápidas do Chat */}
-              <div className="flex items-center gap-2">
-                {activeLead && (
-                  <Link href={`/leads/${activeLead.id}`}>
-                    <Button variant="secondary" size="sm" className="text-xs h-8 gap-1.5">
-                      <User className="w-3.5 h-3.5 text-[#8EB69B]" />
-                      <span className="hidden md:inline">Ver Ficha</span>
-                    </Button>
-                  </Link>
+            {/* Rabisco Atual sendo desenhado no momento */}
+            {currentStroke && currentStroke.points.length > 1 && (
+              <path
+                d={currentStroke.points.reduce(
+                  (acc, pt, idx) => (idx === 0 ? `M ${pt.x} ${pt.y}` : `${acc} L ${pt.x} ${pt.y}`),
+                  ''
                 )}
-
-                <Link href="/pipeline">
-                  <Button variant="secondary" size="sm" className="text-xs h-8 gap-1.5">
-                    <Kanban className="w-3.5 h-3.5 text-[#F1F9A1]" />
-                    <span className="hidden md:inline">Pipeline</span>
-                  </Button>
-                </Link>
-
-                <button
-                  onClick={() => openWhatsApp(activeChat.phone)}
-                  className="p-2 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 border border-[#25D366]/30 text-[#25D366] transition-all active:scale-95"
-                  title="Abrir no WhatsApp Oficial"
-                >
-                  <WhatsAppIcon className="w-4 h-4 fill-current" />
-                </button>
-
-                <button
-                  onClick={() => setShowLeadDetails(!showLeadDetails)}
-                  className={`p-2 rounded-xl border transition-all text-xs ${
-                    showLeadDetails
-                      ? 'bg-[#163832] text-[#F1F9A1] border-[#8EB69B]/40'
-                      : 'bg-[#10201E] text-[var(--evo-muted)] border-[var(--evo-border)]'
-                  }`}
-                  title={showLeadDetails ? 'Ocultar detalhes do lead' : 'Ver detalhes do lead'}
-                >
-                  <Info className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Área de Mensagens (Estilo WhatsApp) */}
-            <div className="flex-1 p-5 overflow-y-auto space-y-3 bg-[radial-gradient(#163832_1px,transparent_1px)] [background-size:24px_24px] [background-color:#07100F]">
-              <div className="flex justify-center my-2">
-                <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-[#10201E] text-[#8EB69B] border border-[var(--evo-border)]">
-                  Hoje • Criptografia de ponta a ponta
-                </span>
-              </div>
-
-              {activeChat.messages.map((msg) => {
-                const isUser = msg.sender === 'user';
-
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in duration-150`}
-                  >
-                    <div
-                      className={`max-w-[78%] md:max-w-[65%] rounded-2xl p-3 shadow-md relative group ${
-                        isUser
-                          ? 'bg-[#163832] text-[#DAF1DE] rounded-br-none border border-[#8EB69B]/30'
-                          : 'bg-[#0C1A19] text-[var(--evo-text)] rounded-bl-none border border-[var(--evo-border)]'
-                      }`}
-                    >
-                      <p className="text-xs leading-relaxed whitespace-pre-wrap select-text">
-                        {msg.text}
-                      </p>
-
-                      <div className="flex items-center justify-end gap-1 mt-1 text-[10px] text-[#8EB69B]/80 font-mono">
-                        <span>{msg.time}</span>
-                        {isUser && (
-                          <span>
-                            {msg.status === 'read' ? (
-                              <CheckCheck className="w-3.5 h-3.5 text-[#38BDF8]" />
-                            ) : msg.status === 'delivered' ? (
-                              <CheckCheck className="w-3.5 h-3.5 text-[#8EB69B]" />
-                            ) : (
-                              <Check className="w-3.5 h-3.5 text-[#8EB69B]" />
-                            )}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Menu de Templates Rápidos de Abordagem */}
-            {isTemplatesOpen && (
-              <div className="absolute bottom-16 left-4 right-4 max-w-xl bg-[#0C1A19] border border-[#8EB69B]/40 rounded-2xl p-4 shadow-2xl z-20 space-y-2 animate-in fade-in zoom-in-95">
-                <div className="flex items-center justify-between border-b border-[var(--evo-border)] pb-2">
-                  <span className="text-xs font-semibold text-[#F1F9A1] font-heading flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Modelos Rápidos de Prospecção & Vendas
-                  </span>
-                  <button
-                    onClick={() => setIsTemplatesOpen(false)}
-                    className="text-xs text-[#9BA6A0] hover:text-[#E7ECE8]"
-                  >
-                    Fechar
-                  </button>
-                </div>
-                <div className="space-y-1.5 max-h-56 overflow-y-auto">
-                  {QUICK_TEMPLATES.map((tmpl, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => {
-                        setInputText(tmpl.text);
-                        setIsTemplatesOpen(false);
-                      }}
-                      className="w-full text-left p-2.5 rounded-xl bg-[#10201E] hover:bg-[#163832] border border-[var(--evo-border)] text-xs transition-colors"
-                    >
-                      <div className="font-semibold text-[#E7ECE8] mb-0.5">{tmpl.title}</div>
-                      <div className="text-[11px] text-[#9BA6A0] line-clamp-2 italic">
-                        {tmpl.text}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Barra de Digitação & Envio */}
-            <div className="p-3 bg-[#07100F] border-t border-[var(--evo-border)] flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setIsTemplatesOpen(!isTemplatesOpen)}
-                className={`p-2 rounded-xl border transition-all ${
-                  isTemplatesOpen
-                    ? 'bg-[#163832] text-[#F1F9A1] border-[#8EB69B]/40'
-                    : 'bg-[#10201E] hover:bg-[#163832] text-[#8EB69B] hover:text-[#F1F9A1] border-[var(--evo-border)]'
-                }`}
-                title="Modelos de Mensagem IA"
-              >
-                <Sparkles className="w-4 h-4" />
-              </button>
-
-              <input
-                type="text"
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-                placeholder={`Digite uma mensagem para ${activeChat.companyName}... (Pressione Enter para enviar)`}
-                className="flex-1 px-4 py-2.5 rounded-xl bg-[#10201E] border border-[var(--evo-border)] text-xs text-[var(--evo-text)] placeholder-[#65706A] focus:outline-none focus:border-[#8EB69B]"
+                fill="none"
+                stroke={currentStroke.color}
+                strokeWidth={currentStroke.width}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity="0.95"
               />
+            )}
+          </svg>
 
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={handleSendMessage}
-                disabled={!inputText.trim()}
-                className="h-10 px-4 gap-1.5 bg-[#25D366] hover:bg-[#20ba59] text-black font-semibold border-none shrink-0"
-              >
-                <span>Enviar</span>
-                <Send className="w-3.5 h-3.5" />
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-xs text-[var(--evo-muted)]">
-            Selecione uma conversa para começar a digitar.
-          </div>
-        )}
+          {/* ===================================================================== */}
+          {/* 3.2. CARDS / MENSAGENS INTERATIVAS (ESCREVER LIVREMENTE & ARRASTAR)   */}
+          {/* ===================================================================== */}
+          {cards.map((card) => {
+            const isConnecting = connectingFromId === card.id;
 
-        {/* =====================================================================
-            COLUNA 3: FICHA LATERAL RÁPIDA DO LEAD (INTEGRAÇÃO CRM)
-            ===================================================================== */}
-        {showLeadDetails && activeChat && (
-          <div className="w-72 border-l border-[var(--evo-border)] bg-[#07100F]/95 p-4 overflow-y-auto space-y-4 shrink-0 hidden lg:block">
-            <div className="text-center pb-3 border-b border-[var(--evo-border)]">
-              <div className="w-14 h-14 rounded-2xl bg-[#163832] border border-[var(--evo-border)] flex items-center justify-center text-base font-bold text-[#F1F9A1] font-heading mx-auto mb-2 shadow-inner">
-                {activeChat.companyName.substring(0, 2).toUpperCase()}
-              </div>
-              <h3 className="text-xs font-bold text-[var(--evo-text)] font-heading leading-tight">
-                {activeChat.companyName}
-              </h3>
-              <p className="text-[11px] text-[#8EB69B] mt-0.5">{activeChat.contactName}</p>
-            </div>
+            return (
+              <div
+                key={card.id}
+                onMouseDown={(e) => {
+                  if (tool === 'connect') {
+                    handleCardConnectClick(card.id, e);
+                    return;
+                  }
+                  if (tool !== 'select') return;
 
-            {/* Informações Comerciais */}
-            <div className="space-y-2 text-xs">
-              <span className="text-[10px] font-mono text-[#8EB69B] uppercase tracking-wider font-semibold">
-                Dados no CRM
-              </span>
+                  // Iniciar arrasto se não estiver clicando em textarea ou botões
+                  const target = e.target as HTMLElement;
+                  if (
+                    target.tagName === 'INPUT' ||
+                    target.tagName === 'TEXTAREA' ||
+                    target.tagName === 'BUTTON' ||
+                    target.closest('button')
+                  ) {
+                    return;
+                  }
 
-              <div className="p-2.5 rounded-xl bg-[#10201E] border border-[var(--evo-border)] space-y-1.5 text-[11px]">
-                <div className="flex items-center justify-between">
-                  <span className="text-[#9BA6A0]">Nicho:</span>
-                  <span className="font-mono text-[var(--evo-text)]">{activeChat.segment || 'Geral'}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[#9BA6A0]">Score IA:</span>
-                  <span className="font-mono text-[#F1F9A1] font-bold">{activeChat.score || 80}/100</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[#9BA6A0]">Telefone:</span>
-                  <span className="font-mono text-[var(--evo-text)]">{activeChat.phone}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Estágio do Pipeline */}
-            <div className="space-y-2 text-xs">
-              <span className="text-[10px] font-mono text-[#8EB69B] uppercase tracking-wider font-semibold">
-                Estágio Pipeline
-              </span>
-              <div className="p-2.5 rounded-xl bg-[#10201E] border border-[var(--evo-border)] text-center">
-                <span className="text-xs font-semibold text-[#F1F9A1] font-heading">
-                  {activeOpp ? activeOpp.stage_slug.replace('_', ' ').toUpperCase() : 'PRIMEIRO CONTATO'}
-                </span>
-                <p className="text-[10px] text-[#9BA6A0] mt-1">
-                  Avança automaticamente para Follow-up após 24h em Proposta
-                </p>
-                <Link href="/pipeline" className="mt-2 block">
-                  <Button variant="secondary" size="sm" className="w-full text-[11px] h-7 gap-1">
-                    <span>Abrir no Funil</span>
-                    <ArrowUpRight className="w-3 h-3 text-[#8EB69B]" />
-                  </Button>
-                </Link>
-              </div>
-            </div>
-
-            {/* Próximas Ações Rápidas */}
-            <div className="pt-2 border-t border-[var(--evo-border)] space-y-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full text-xs gap-1.5 text-[#F1F9A1] hover:border-[#F1F9A1]/30"
-                onClick={() => {
-                  setInputText(`Olá ${activeChat.contactName}, preparei a proposta oficial com as condições especiais para a ${activeChat.companyName}. Faria sentido agendarmos uma chamada de 10 minutos hoje?`);
+                  const pos = screenToCanvas(e.clientX, e.clientY);
+                  setDraggingCardId(card.id);
+                  setDragOffset({ x: pos.x - card.x, y: pos.y - card.y });
+                }}
+                className={`absolute pointer-events-auto rounded-2xl shadow-xl transition-shadow flex flex-col group select-text ${
+                  isConnecting
+                    ? 'ring-4 ring-[#F1F9A1] shadow-2xl scale-[1.02]'
+                    : 'hover:shadow-2xl hover:scale-[1.01]'
+                }`}
+                style={{
+                  transform: `translate(${card.x}px, ${card.y}px)`,
+                  width: `${card.width}px`,
+                  minHeight: `${card.height}px`,
+                  backgroundColor: card.color,
+                  color: card.textColor || '#07100F',
                 }}
               >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Gerar Pitch com IA</span>
-              </Button>
-            </div>
-          </div>
-        )}
+                {/* Cabeçalho do Card com Título Editável e Ações */}
+                <div className="px-3.5 pt-3 pb-1 flex items-center justify-between gap-1 border-b border-black/10">
+                  <input
+                    type="text"
+                    value={card.title}
+                    onChange={(e) => {
+                      const newTitle = e.target.value;
+                      const updated = cards.map((c) =>
+                        c.id === card.id ? { ...c, title: newTitle } : c
+                      );
+                      saveCards(updated);
+                    }}
+                    placeholder="Título da Mensagem..."
+                    className="w-full bg-transparent font-heading font-semibold text-xs focus:outline-none focus:bg-white/30 rounded px-1 -ml-1 transition-colors"
+                    style={{ color: card.textColor || '#07100F' }}
+                  />
+
+                  {/* Ações do Card */}
+                  <div className="flex items-center gap-0.5 opacity-40 group-hover:opacity-100 transition-opacity shrink-0">
+                    {/* Botão de Conectar Rápido */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleCardConnectClick(card.id, e)}
+                      className="p-1 rounded hover:bg-black/15 transition-colors"
+                      title="Conectar a outro card"
+                    >
+                      <Link2 className="w-3 h-3" />
+                    </button>
+
+                    {/* Duplicar Card */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleDuplicateCard(card, e)}
+                      className="p-1 rounded hover:bg-black/15 transition-colors"
+                      title="Duplicar Card"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
+
+                    {/* Excluir Card */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteCard(card.id, e)}
+                      className="p-1 rounded hover:bg-black/15 hover:text-red-700 transition-colors"
+                      title="Excluir Card"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Conteúdo / Texto Livre da Mensagem */}
+                <div className="p-3 flex-1 flex flex-col">
+                  <textarea
+                    value={card.content}
+                    onChange={(e) => {
+                      const newContent = e.target.value;
+                      const updated = cards.map((c) =>
+                        c.id === card.id ? { ...c, content: newContent } : c
+                      );
+                      saveCards(updated);
+                    }}
+                    placeholder="Escreva livremente aqui o texto da mensagem, gatilhos, scripts ou anotações..."
+                    rows={4}
+                    className="w-full flex-1 bg-transparent resize-none text-[11px] leading-relaxed focus:outline-none focus:bg-white/20 rounded p-1 -m-1 transition-colors"
+                    style={{ color: card.textColor || '#07100F' }}
+                  />
+                </div>
+
+                {/* Rodapé do Card com Seletor Rápido de Cor */}
+                <div className="px-3 pb-2.5 pt-1 flex items-center justify-between text-[10px] opacity-25 group-hover:opacity-100 transition-opacity">
+                  <span className="font-mono text-[9px] uppercase tracking-wider">
+                    Evo Card
+                  </span>
+
+                  <div className="flex items-center gap-1">
+                    {CARD_COLORS.map((col) => (
+                      <button
+                        key={col.bg}
+                        type="button"
+                        onClick={(e) => handleChangeCardColor(card.id, col.bg, col.text, e)}
+                        className={`w-3.5 h-3.5 rounded-full border transition-all ${
+                          card.color === col.bg
+                            ? 'scale-125 border-black/60 shadow-sm'
+                            : 'border-black/20 hover:scale-110'
+                        }`}
+                        style={{ backgroundColor: col.bg }}
+                        title={col.name}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Modal Conexão QR Code (Evolution API / WhatsApp Não Oficial) */}
-      <Modal
-        isOpen={isQrModalOpen}
-        onClose={() => setIsQrModalOpen(false)}
-        title="Conectar WhatsApp via QR Code"
-        subtitle="Escaneie o QR Code no seu aplicativo do WhatsApp (Aparelhos Conectados) para habilitar o envio e leitura de mensagens no CRM."
-        maxWidth="md"
-      >
-        <div className="p-4 text-center space-y-4">
-          <div className="inline-block p-4 rounded-2xl bg-white shadow-xl mx-auto">
-            {/* QR Code Visual Estilizado */}
-            <div className="w-52 h-52 flex flex-col items-center justify-center border-4 border-black p-2 bg-white relative">
-              <div className="grid grid-cols-6 gap-1 w-full h-full p-2 bg-gray-50 border border-gray-300">
-                {Array.from({ length: 36 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className={`rounded-sm ${
-                      (i % 2 === 0 || i % 5 === 0 || i < 8) && i !== 14
-                        ? 'bg-black'
-                        : 'bg-transparent'
-                    }`}
-                  />
-                ))}
+      {/* ========================================================================= */}
+      {/* 4. MODAL PARA EDITAR OU EXCLUIR RÓTULO DE CONEXÃO                         */}
+      {/* ========================================================================= */}
+      {editingConnectionId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-sm bg-[#0C1A19] border border-[rgba(218,241,222,0.15)] rounded-2xl p-5 shadow-2xl space-y-4 text-[#E7ECE8]">
+            <div className="flex items-center justify-between border-b border-[rgba(218,241,222,0.06)] pb-3">
+              <div className="flex items-center gap-2">
+                <Link2 className="w-4 h-4 text-[#8EB69B]" />
+                <h3 className="text-sm font-heading font-semibold text-[#E7ECE8]">
+                  Editar Conexão
+                </h3>
               </div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="p-2 rounded-xl bg-white shadow-lg border border-gray-200">
-                  <WhatsAppIcon className="w-8 h-8 fill-[#25D366]" />
-                </div>
+              <button
+                type="button"
+                onClick={() => setEditingConnectionId(null)}
+                className="p-1 rounded-lg text-[#9BA6A0] hover:text-[#E7ECE8]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-[#9BA6A0] block">
+                Texto / Etiqueta da Conexão:
+              </label>
+              <input
+                type="text"
+                value={connectionLabelInput}
+                onChange={(e) => setConnectionLabelInput(e.target.value)}
+                placeholder="Ex: Includes, Requer, Follow-up, Se responder..."
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.1)] text-xs text-[#E7ECE8] placeholder-[#65706A] focus:outline-none focus:border-[#8EB69B]"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <button
+                type="button"
+                onClick={(e) => handleDeleteConnection(editingConnectionId, e)}
+                className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs font-medium border border-red-500/30 flex items-center gap-1.5 transition-all"
+              >
+                <Trash2 className="w-3 h-3" />
+                Excluir Conexão
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingConnectionId(null)}
+                  className="px-3 py-1.5 rounded-xl bg-[#10201E] text-[#9BA6A0] hover:text-[#E7ECE8] text-xs transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveConnectionLabel(editingConnectionId)}
+                  className="px-4 py-1.5 rounded-xl bg-[#8EB69B] hover:bg-[#a1cca8] text-[#07100F] text-xs font-heading font-semibold transition-colors"
+                >
+                  Salvar
+                </button>
               </div>
             </div>
-          </div>
-
-          <div className="space-y-1">
-            <p className="text-xs font-semibold text-[var(--evo-text)]">
-              Instância: <strong className="font-mono text-[#F1F9A1]">{instanceName}</strong>
-            </p>
-            <p className="text-[11px] text-[var(--evo-muted)]">
-              1. Abra o WhatsApp no celular &gt; 2. Toque em Aparelhos Conectados &gt; 3. Conectar um aparelho.
-            </p>
-            <div className="text-[11px] font-mono text-[#8EB69B] pt-1">
-              QR Code expira em: <strong>{qrTimer}s</strong>
-            </div>
-          </div>
-
-          <div className="flex justify-center gap-2 pt-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setIsQrModalOpen(false)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              className="bg-[#25D366] hover:bg-[#20ba59] text-black border-none font-semibold gap-1.5"
-              onClick={handleSimulateQrScan}
-            >
-              <Check className="w-4 h-4" />
-              <span>Simular Escaneamento (Conectar)</span>
-            </Button>
           </div>
         </div>
-      </Modal>
+      )}
     </div>
   );
 }

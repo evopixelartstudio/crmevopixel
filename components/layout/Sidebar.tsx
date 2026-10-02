@@ -20,6 +20,7 @@ import {
   History,
   Crosshair,
   CalendarCheck,
+  MessageSquare,
 } from 'lucide-react';
 
 interface NavItem {
@@ -49,6 +50,7 @@ export function Sidebar() {
       items: [
         { label: 'Leads', href: '/leads', icon: Users },
         { label: 'Pipeline', href: '/pipeline', icon: Kanban },
+        { label: 'Mensagens', href: '/mensagens', icon: MessageSquare },
       ],
     },
     {
