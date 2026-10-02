@@ -16,3 +16,4 @@ COMMENT ON COLUMN public.projects.drive_folder_url IS 'Link direto para a pasta 
 COMMENT ON COLUMN public.projects.client_access_notes IS 'Acessos e credenciais do cliente (DNS, Hostinger, WordPress) com formatação segura';
 COMMENT ON COLUMN public.projects.color_palette IS 'Paleta de cores do projeto (hexadecimais)';
 COMMENT ON COLUMN public.projects.typography_fonts IS 'Fontes e tipografia do projeto';
+
