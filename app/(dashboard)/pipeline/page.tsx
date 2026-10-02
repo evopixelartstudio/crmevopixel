@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { getSupabase } from '@/lib/supabase/client';
 import { crmService } from '@/lib/services/crm-service';
-import { useCrmSync } from '@/lib/hooks/useCrmSync';
-import { Opportunity, Temperature } from '@/types/database';
+import { Lead, Opportunity, PipelineStage, Temperature } from '@/types/database';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
@@ -14,218 +14,416 @@ import {
   Plus,
   ArrowRight,
   ArrowLeft,
-  Clock,
-  Zap,
   Pencil,
   Trash2,
   Search,
   CheckCircle2,
+  RefreshCw,
+  Building2,
+  User,
 } from 'lucide-react';
 
-const STAGES = [
-  { slug: 'primeiro_contato', name: 'Primeiro Contato' },
-  { slug: 'proposta', name: 'Proposta' },
-  { slug: 'projeto_em_andamento', name: 'Projeto em andamento' },
-  { slug: 'fechado', name: 'Fechado' },
-  { slug: 'follow_up', name: 'Follow-up' },
-  { slug: 'lead_perdido', name: 'Lead Perdido' },
-];
+interface SupabaseOpportunityRow {
+  id: string;
+  lead_id: string | null;
+  stage_id: string;
+  company_id: string | null;
+  title: string;
+  estimated_value: number;
+  probability: number;
+  status: string;
+  created_at?: string;
+  updated_at?: string;
+  leads?: Partial<Lead> | Partial<Lead>[] | null;
+}
 
 export default function PipelinePage() {
-  useCrmSync();
-  const [opportunities, setOpportunities] = useState<Opportunity[]>(() =>
-    crmService.getOpportunities()
-  );
-  const [viewMode, setViewMode] = useState<'lista' | 'kanban'>('lista');
+  const [stages, setStages] = useState<PipelineStage[]>([]);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [leadsList, setLeadsList] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const [viewMode, setViewMode] = useState<'kanban' | 'lista'>('kanban');
   const [selectedStageFilter, setSelectedStageFilter] = useState<string>('todos');
   const [searchTerm, setSearchTerm] = useState('');
-  const [isNewOppModalOpen, setIsNewOppModalOpen] = useState(false);
+  const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
 
-  // Estado de edição e exclusão
+  // Modal: Nova Oportunidade
+  const [isNewOppModalOpen, setIsNewOppModalOpen] = useState(false);
+  const [isSavingNew, setIsSavingNew] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newLeadId, setNewLeadId] = useState<string>('');
+  const [newStageId, setNewStageId] = useState<string>('');
+  const [newValue, setNewValue] = useState('');
+  const [newProbability, setNewProbability] = useState('50');
+  const [newStatus, setNewStatus] = useState('aberta');
+
+  // Modal: Edição e Exclusão
   const [editingOpp, setEditingOpp] = useState<Opportunity | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [deletingOppId, setDeletingOppId] = useState<string | null>(null);
 
-  // Campos do modal de edição
   const [editTitle, setEditTitle] = useState('');
-  const [editCompany, setEditCompany] = useState('');
-  const [editContact, setEditContact] = useState('');
+  const [editLeadId, setEditLeadId] = useState<string>('');
+  const [editStageId, setEditStageId] = useState<string>('');
   const [editValue, setEditValue] = useState('');
-  const [editStage, setEditStage] = useState('primeiro_contato');
-  const [editTemperature, setEditTemperature] = useState<Temperature>('quente');
   const [editProbability, setEditProbability] = useState('50');
-  const [editServices, setEditServices] = useState('');
+  const [editStatus, setEditStatus] = useState('aberta');
 
-  // Monitorar regra de 24h em Proposta e sincronizar dados
-  useEffect(() => {
-    crmService.checkPropostaAutoFollowUp();
-    setOpportunities([...crmService.getOpportunities()]);
+  const mapRowToOpportunity = useCallback(
+    (row: SupabaseOpportunityRow, stageMap: Map<string, PipelineStage>): Opportunity => {
+      const leadObj = Array.isArray(row.leads) ? row.leads[0] : row.leads;
+      const stage = stageMap.get(row.stage_id);
 
-    const unsubscribe = crmService.subscribe(() => {
-      setOpportunities([...crmService.getOpportunities()]);
-    });
+      const companyName =
+        leadObj?.company_name ||
+        leadObj?.name ||
+        row.title ||
+        'Sem empresa vinculada';
+      const leadName = leadObj?.name || 'Sem contato vinculado';
+      const temp: Temperature = (leadObj?.temperature as Temperature) || 'quente';
+      const score = typeof leadObj?.score === 'number' ? leadObj.score : 80;
+      const services = Array.isArray(leadObj?.services) ? leadObj.services : [];
 
-    const interval = setInterval(() => {
-      if (crmService.checkPropostaAutoFollowUp()) {
-        setOpportunities([...crmService.getOpportunities()]);
+      return {
+        id: row.id,
+        lead_id: row.lead_id ?? null,
+        stage_id: row.stage_id,
+        company_id: row.company_id ?? null,
+        title: row.title || companyName,
+        estimated_value: Number(row.estimated_value) || 0,
+        probability: Number(row.probability) || 0,
+        status: row.status || 'aberta',
+        stage_slug: stage?.slug || '',
+        lead_name: leadName,
+        company_name: companyName,
+        score,
+        temperature: temp,
+        priority: 'alta',
+        services,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        leads: leadObj || null,
+      };
+    },
+    []
+  );
+
+  const fetchPipelineData = useCallback(async () => {
+    setLoading(true);
+    setErrorMsg(null);
+
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('evocrm_opps');
       }
-    }, 30000);
+
+      const supabase = getSupabase();
+
+      const [stagesRes, oppsRes, leadsRes] = await Promise.all([
+        supabase
+          .from('pipeline_stages')
+          .select('id, name, slug, display_order, color')
+          .order('display_order', { ascending: true }),
+        supabase
+          .from('opportunities')
+          .select(
+            'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, leads(*)'
+          ),
+        supabase
+          .from('leads')
+          .select('id, name, company_name, segment, phone, whatsapp, email, temperature, score')
+          .order('created_at', { ascending: false }),
+      ]);
+
+      if (stagesRes.error) {
+        throw new Error(`Erro ao buscar etapas (pipeline_stages): ${stagesRes.error.message}`);
+      }
+      if (oppsRes.error) {
+        throw new Error(`Erro ao buscar oportunidades (opportunities): ${oppsRes.error.message}`);
+      }
+
+      const loadedStages = (stagesRes.data || []) as PipelineStage[];
+      setStages(loadedStages);
+
+      setNewStageId((prev) => prev || (loadedStages[0]?.id ?? ''));
+
+      const stageMap = new Map<string, PipelineStage>(
+        loadedStages.map((s) => [s.id, s])
+      );
+
+      const loadedOpps = ((oppsRes.data || []) as SupabaseOpportunityRow[]).map((row) =>
+        mapRowToOpportunity(row, stageMap)
+      );
+
+      setOpportunities(loadedOpps);
+      crmService.setOpportunitiesFromSupabase(loadedOpps);
+
+      if (!leadsRes.error && leadsRes.data) {
+        setLeadsList(leadsRes.data as Lead[]);
+      }
+    } catch (err: any) {
+      console.error('Erro ao carregar Pipeline do Supabase:', err);
+      setErrorMsg(err?.message || 'Erro ao conectar com o Supabase.');
+    } finally {
+      setLoading(false);
+    }
+  }, [mapRowToOpportunity]);
+
+  useEffect(() => {
+    fetchPipelineData();
+
+    const supabase = getSupabase();
+    const channel = supabase
+      .channel('pipeline-realtime-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'opportunities' },
+        () => {
+          fetchPipelineData();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'pipeline_stages' },
+        () => {
+          fetchPipelineData();
+        }
+      )
+      .subscribe();
 
     return () => {
-      unsubscribe();
-      clearInterval(interval);
+      supabase.removeChannel(channel);
     };
-  }, []);
+  }, [fetchPipelineData]);
 
-  // Form states (Nova Oportunidade)
-  const [newTitle, setNewTitle] = useState('');
-  const [newCompany, setNewCompany] = useState('');
-  const [newContact, setNewContact] = useState('');
-  const [newValue, setNewValue] = useState('');
-  const [newStage, setNewStage] = useState('primeiro_contato');
+  // Atualizar etapa (Drag & Drop ou Select) executando UPDATE apenas no stage_id em public.opportunities
+  const handleStageChange = async (oppId: string, targetStageId: string) => {
+    const targetStage = stages.find((s) => s.id === targetStageId);
+    if (!targetStage) return;
 
-  const setStage = (oppId: string, stageSlug: string) => {
-    crmService.updateOpportunityStage(oppId, stageSlug);
-    setOpportunities([...crmService.getOpportunities()]);
+    const currentOpp = opportunities.find((o) => o.id === oppId);
+    if (!currentOpp || currentOpp.stage_id === targetStageId) return;
+
+    // Atualização otimista na UI
+    const previousOpps = [...opportunities];
+    const updatedOpp: Opportunity = {
+      ...currentOpp,
+      stage_id: targetStage.id,
+      stage_slug: targetStage.slug,
+    };
+
+    const nextOpps = opportunities.map((o) => (o.id === oppId ? updatedOpp : o));
+    setOpportunities(nextOpps);
+    crmService.setOpportunitiesFromSupabase(nextOpps);
+
+    const supabase = getSupabase();
+    const { error } = await supabase
+      .from('opportunities')
+      .update({ stage_id: targetStage.id })
+      .eq('id', oppId);
+
+    if (error) {
+      console.error('Erro ao atualizar stage_id em public.opportunities:', error);
+      alert(`Não foi possível mover o card: ${error.message}`);
+      setOpportunities(previousOpps);
+      crmService.setOpportunitiesFromSupabase(previousOpps);
+      return;
+    }
+
+    crmService.triggerStageSideEffects(updatedOpp, targetStage.slug);
   };
 
-  const moveStage = (oppId: string, direction: 'prev' | 'next') => {
-    const opp = opportunities.find((o) => o.id === oppId);
-    if (!opp) return;
-    const currentSlug = opp.stage_slug === 'negociacao' ? 'proposta' : opp.stage_slug;
-    const currentIndex = STAGES.findIndex((s) => s.slug === currentSlug);
+  const moveStageDirection = (opp: Opportunity, direction: 'prev' | 'next') => {
+    const currentIndex = stages.findIndex((s) => s.id === opp.stage_id);
+    if (currentIndex === -1) return;
     const newIndex =
       direction === 'next'
-        ? Math.min(STAGES.length - 1, currentIndex + 1)
+        ? Math.min(stages.length - 1, currentIndex + 1)
         : Math.max(0, currentIndex - 1);
-    setStage(oppId, STAGES[newIndex].slug);
+    const targetStage = stages[newIndex];
+    if (targetStage && targetStage.id !== opp.stage_id) {
+      handleStageChange(opp.id, targetStage.id);
+    }
   };
 
+  // Criar Nova Oportunidade diretamente com INSERT em public.opportunities
+  const handleCreateOpp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim()) {
+      alert('Preencha o título da oportunidade.');
+      return;
+    }
+
+    const stageIdToUse = newStageId || stages[0]?.id;
+    if (!stageIdToUse) {
+      alert('Nenhuma etapa encontrada em public.pipeline_stages.');
+      return;
+    }
+
+    setIsSavingNew(true);
+    try {
+      const supabase = getSupabase();
+      const payload = {
+        lead_id: newLeadId ? newLeadId : null,
+        stage_id: stageIdToUse,
+        company_id: null,
+        title: newTitle.trim(),
+        estimated_value: Number(newValue) || 0,
+        probability: Math.min(100, Math.max(0, Number(newProbability) || 0)),
+        status: newStatus || 'aberta',
+      };
+
+      const { data, error } = await supabase
+        .from('opportunities')
+        .insert([payload])
+        .select(
+          'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, leads(*)'
+        )
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      const stageMap = new Map<string, PipelineStage>(stages.map((s) => [s.id, s]));
+      const createdOpp = mapRowToOpportunity(data as SupabaseOpportunityRow, stageMap);
+
+      const nextOpps = [createdOpp, ...opportunities];
+      setOpportunities(nextOpps);
+      crmService.setOpportunitiesFromSupabase(nextOpps);
+
+      const chosenStage = stageMap.get(stageIdToUse);
+      if (chosenStage) {
+        crmService.triggerStageSideEffects(createdOpp, chosenStage.slug);
+      }
+
+      setNewTitle('');
+      setNewLeadId('');
+      setNewValue('');
+      setNewProbability('50');
+      setNewStatus('aberta');
+      setIsNewOppModalOpen(false);
+    } catch (err: any) {
+      console.error('Erro ao inserir oportunidade no Supabase:', err);
+      alert(`Erro ao salvar oportunidade no Supabase: ${err?.message || 'Erro desconhecido'}`);
+    } finally {
+      setIsSavingNew(false);
+    }
+  };
+
+  // Abrir modal de edição
   const handleOpenEditModal = (opp: Opportunity, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setEditingOpp(opp);
     setEditTitle(opp.title || '');
-    setEditCompany(opp.company_name || '');
-    setEditContact(opp.lead_name || '');
+    setEditLeadId(opp.lead_id || '');
+    setEditStageId(opp.stage_id || stages[0]?.id || '');
     setEditValue(String(opp.estimated_value ?? 0));
-    setEditStage(opp.stage_slug === 'negociacao' ? 'proposta' : opp.stage_slug);
-    setEditTemperature(opp.temperature || 'quente');
     setEditProbability(String(opp.probability ?? 50));
-    setEditServices((opp.services || []).join(', '));
+    setEditStatus(opp.status || 'aberta');
   };
 
-  const handleSaveEditOpp = (e: React.FormEvent) => {
+  // Salvar edição diretamente em public.opportunities
+  const handleSaveEditOpp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingOpp) return;
-    if (!editCompany.trim() || !editTitle.trim()) {
-      alert('Preencha ao menos o Título e a Empresa.');
+    if (!editTitle.trim()) {
+      alert('Preencha o título da oportunidade.');
       return;
     }
 
-    const parsedServices = editServices
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
+    setIsSavingEdit(true);
+    try {
+      const supabase = getSupabase();
+      const payload = {
+        title: editTitle.trim(),
+        lead_id: editLeadId ? editLeadId : null,
+        stage_id: editStageId || editingOpp.stage_id,
+        estimated_value: Number(editValue) || 0,
+        probability: Math.min(100, Math.max(0, Number(editProbability) || 0)),
+        status: editStatus || 'aberta',
+      };
 
-    crmService.updateOpportunity(editingOpp.id, {
-      title: editTitle.trim(),
-      company_name: editCompany.trim(),
-      lead_name: editContact.trim() || editCompany.trim(),
-      estimated_value: Number(editValue) || 0,
-      stage_slug: editStage,
-      temperature: editTemperature,
-      probability: Math.min(100, Math.max(0, Number(editProbability) || 0)),
-      services: parsedServices.length > 0 ? parsedServices : ['Site Institucional'],
-    });
+      const { data, error } = await supabase
+        .from('opportunities')
+        .update(payload)
+        .eq('id', editingOpp.id)
+        .select(
+          'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, leads(*)'
+        )
+        .single();
 
-    setOpportunities([...crmService.getOpportunities()]);
-    setEditingOpp(null);
+      if (error) {
+        throw error;
+      }
+
+      const stageMap = new Map<string, PipelineStage>(stages.map((s) => [s.id, s]));
+      const updatedOpp = mapRowToOpportunity(data as SupabaseOpportunityRow, stageMap);
+
+      const nextOpps = opportunities.map((o) => (o.id === editingOpp.id ? updatedOpp : o));
+      setOpportunities(nextOpps);
+      crmService.setOpportunitiesFromSupabase(nextOpps);
+
+      if (editingOpp.stage_id !== updatedOpp.stage_id) {
+        const chosenStage = stageMap.get(updatedOpp.stage_id || '');
+        if (chosenStage) {
+          crmService.triggerStageSideEffects(updatedOpp, chosenStage.slug);
+        }
+      }
+
+      setEditingOpp(null);
+    } catch (err: any) {
+      console.error('Erro ao atualizar oportunidade no Supabase:', err);
+      alert(`Erro ao atualizar oportunidade: ${err?.message || 'Erro desconhecido'}`);
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
-  const handleDeleteOpp = (id: string, e?: React.MouseEvent) => {
+  // Excluir oportunidade diretamente de public.opportunities
+  const handleDeleteOpp = async (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    crmService.deleteOpportunity(id);
-    setOpportunities([...crmService.getOpportunities()]);
+    const previousOpps = [...opportunities];
+    const nextOpps = opportunities.filter((o) => o.id !== id);
+    setOpportunities(nextOpps);
+    crmService.setOpportunitiesFromSupabase(nextOpps);
     setDeletingOppId(null);
+
+    const supabase = getSupabase();
+    const { error } = await supabase.from('opportunities').delete().eq('id', id);
+    if (error) {
+      console.error('Erro ao excluir oportunidade:', error);
+      alert(`Erro ao excluir oportunidade: ${error.message}`);
+      setOpportunities(previousOpps);
+      crmService.setOpportunitiesFromSupabase(previousOpps);
+      return;
+    }
+
     if (editingOpp?.id === id) {
       setEditingOpp(null);
     }
   };
 
-  const handleCreateOpp = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newCompany.trim() || !newTitle.trim()) {
-      alert('Preencha ao menos o Título e a Empresa.');
-      return;
-    }
-
-    crmService.addOpportunity({
-      lead_id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `lead-${Date.now()}`,
-      lead_name: newContact.trim() || 'Contato Principal',
-      company_name: newCompany.trim(),
-      stage_slug: newStage,
-      title: newTitle.trim(),
-      estimated_value: Number(newValue) || 3500,
-      probability:
-        newStage === 'fechado'
-          ? 100
-          : newStage === 'projeto_em_andamento'
-          ? 90
-          : newStage === 'proposta'
-          ? 70
-          : newStage === 'follow_up'
-          ? 50
-          : 30,
-      score: 85,
-      temperature: 'quente',
-      priority: 'alta',
-      services: ['Site Institucional', 'Automação WhatsApp & Atendimento'],
-      last_interaction: 'Criado agora',
-      stage_entered_at: new Date().toISOString(),
-    });
-
-    setOpportunities([...crmService.getOpportunities()]);
-    setNewTitle('');
-    setNewCompany('');
-    setNewContact('');
-    setNewValue('');
-    setIsNewOppModalOpen(false);
-  };
-
   const totalPipelineValue = opportunities
-    .filter((o) => o.stage_slug !== 'lead_perdido' && o.stage_slug !== 'perdido' && o.stage_slug !== 'fechado')
+    .filter((o) => {
+      const slug = (o.stage_slug || '').toLowerCase();
+      return !slug.includes('perdido') && !slug.includes('fechado');
+    })
     .reduce((acc, o) => acc + (o.estimated_value || 0), 0);
 
   const filteredListOpps = opportunities.filter((opp) => {
-    const normalizedStage = opp.stage_slug === 'negociacao' ? 'proposta' : opp.stage_slug;
-    const matchesStage = selectedStageFilter === 'todos' || normalizedStage === selectedStageFilter;
+    const matchesStage =
+      selectedStageFilter === 'todos' || opp.stage_id === selectedStageFilter;
     const q = searchTerm.trim().toLowerCase();
     const matchesSearch =
       !q ||
-      (opp.company_name || '').toLowerCase().includes(q) ||
-      (opp.lead_name || '').toLowerCase().includes(q) ||
       (opp.title || '').toLowerCase().includes(q) ||
-      (opp.services || []).some((s) => s.toLowerCase().includes(q));
+      (opp.company_name || '').toLowerCase().includes(q) ||
+      (opp.lead_name || '').toLowerCase().includes(q);
     return matchesStage && matchesSearch;
   });
-
-  const getStageBadgeColor = (slug: string) => {
-    switch (slug) {
-      case 'primeiro_contato':
-        return 'bg-blue-500/10 text-blue-300 border-blue-500/25';
-      case 'proposta':
-        return 'bg-[#F1F9A1]/10 text-[#F1F9A1] border-[#F1F9A1]/25';
-      case 'projeto_em_andamento':
-        return 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30';
-      case 'fechado':
-        return 'bg-[#8EB69B]/15 text-[#8EB69B] border-[#8EB69B]/30';
-      case 'follow_up':
-        return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
-      case 'lead_perdido':
-        return 'bg-red-500/10 text-red-400 border-red-500/25';
-      default:
-        return 'bg-[#10201E] text-[#9BA6A0] border-[rgba(218,241,222,0.1)]';
-    }
-  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
@@ -234,19 +432,41 @@ export default function PipelinePage() {
         <div>
           <div className="flex items-center gap-2 text-xs font-mono text-[#8EB69B] uppercase tracking-wider mb-1">
             <Kanban className="w-3.5 h-3.5" />
-            Funil Comercial Operacional
+            Funil Comercial • Dados em Tempo Real (Supabase)
           </div>
           <h1 className="text-2xl lg:text-3xl font-semibold text-[#E7ECE8] font-heading">
             Pipeline de Vendas
           </h1>
           <p className="text-xs text-[#9BA6A0] mt-1">
-            6 etapas estratégicas com automação de tarefas em &ldquo;Projeto em andamento&rdquo; e sincronização em &ldquo;Fechado&rdquo;.
+            Sincronizado diretamente com <code className="text-[#8EB69B]">public.pipeline_stages</code> e{' '}
+            <code className="text-[#8EB69B]">public.opportunities</code> no Supabase.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Alternador Lista / Kanban */}
+          <button
+            type="button"
+            onClick={fetchPipelineData}
+            className="p-2 rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] text-[#9BA6A0] hover:text-[#E7ECE8] transition-all"
+            title="Recarregar dados do Supabase"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[#8EB69B]' : ''}`} />
+          </button>
+
+          {/* Alternador Kanban / Lista */}
           <div className="inline-flex p-1 rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)]">
+            <button
+              type="button"
+              onClick={() => setViewMode('kanban')}
+              className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all ${
+                viewMode === 'kanban'
+                  ? 'bg-[#10201E] text-[#F1F9A1] font-medium border border-[rgba(241,249,161,0.2)]'
+                  : 'text-[#9BA6A0] hover:text-[#E7ECE8]'
+              }`}
+            >
+              <Kanban className="w-3.5 h-3.5" />
+              <span>Kanban</span>
+            </button>
             <button
               type="button"
               onClick={() => setViewMode('lista')}
@@ -258,18 +478,6 @@ export default function PipelinePage() {
             >
               <List className="w-3.5 h-3.5" />
               <span>Lista</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('kanban')}
-              className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 transition-all ${
-                viewMode === 'kanban'
-                  ? 'bg-[#10201E] text-[#F1F9A1] font-medium border border-[rgba(241,249,161,0.2)]'
-                  : 'text-[#9BA6A0] hover:text-[#E7ECE8]'
-              }`}
-            >
-              <Kanban className="w-3.5 h-3.5" />
-              <span>Colunas</span>
             </button>
           </div>
 
@@ -284,18 +492,252 @@ export default function PipelinePage() {
             variant="primary"
             size="sm"
             className="gap-1.5"
-            onClick={() => setIsNewOppModalOpen(true)}
+            onClick={() => {
+              if (!newStageId && stages.length > 0) {
+                setNewStageId(stages[0].id);
+              }
+              setIsNewOppModalOpen(true);
+            }}
           >
             <Plus className="w-3.5 h-3.5 text-[#07100F]" />
-            <span>Nova Oportunidade</span>
+            <span>+ Nova Oportunidade</span>
           </Button>
         </div>
       </div>
 
-      {/* MODO LISTA (PADRÃO) */}
+      {/* Mensagem de erro se houver falha de conexão */}
+      {errorMsg && (
+        <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-center justify-between">
+          <span>{errorMsg}</span>
+          <Button variant="secondary" size="sm" onClick={fetchPipelineData}>
+            Tentar novamente
+          </Button>
+        </div>
+      )}
+
+      {/* Estado de Carregamento Inicial */}
+      {loading && stages.length === 0 ? (
+        <div className="p-14 rounded-2xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] text-center space-y-2">
+          <RefreshCw className="w-6 h-6 text-[#8EB69B] animate-spin mx-auto" />
+          <p className="text-xs text-[#9BA6A0] font-mono">
+            Carregando etapas e oportunidades diretamente do Supabase...
+          </p>
+        </div>
+      ) : null}
+
+      {/* MODO KANBAN (Colunas baseadas em public.pipeline_stages ordenadas por display_order ASC) */}
+      {viewMode === 'kanban' && stages.length > 0 && (
+        <div className="flex gap-4 overflow-x-auto pb-6 pt-1">
+          {stages.map((stage, stageIndex) => {
+            const stageOpps = opportunities.filter((o) => o.stage_id === stage.id);
+            const stageTotal = stageOpps.reduce(
+              (acc, o) => acc + (Number(o.estimated_value) || 0),
+              0
+            );
+            const isDragTarget = dragOverStageId === stage.id;
+
+            return (
+              <div
+                key={stage.id}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (dragOverStageId !== stage.id) {
+                    setDragOverStageId(stage.id);
+                  }
+                }}
+                onDragLeave={() => {
+                  if (dragOverStageId === stage.id) {
+                    setDragOverStageId(null);
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverStageId(null);
+                  const oppId = e.dataTransfer.getData('text/plain');
+                  if (oppId) {
+                    handleStageChange(oppId, stage.id);
+                  }
+                }}
+                className={`w-72 shrink-0 flex flex-col rounded-2xl bg-[#0C1A19]/80 border transition-all overflow-hidden ${
+                  isDragTarget
+                    ? 'border-[#F1F9A1] bg-[#10201E]/60'
+                    : 'border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.18)]'
+                }`}
+              >
+                {/* Header da Coluna com cor da etapa */}
+                <div
+                  className="p-3.5 border-b border-[rgba(218,241,222,0.06)] bg-[#07100F]/60 flex items-center justify-between"
+                  style={{
+                    borderTopWidth: '3px',
+                    borderTopColor: stage.color || '#8EB69B',
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: stage.color || '#8EB69B' }}
+                    />
+                    <span className="text-xs font-semibold text-[#E7ECE8] font-heading">
+                      {stage.name}
+                    </span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#10201E] text-[#9BA6A0]">
+                      {stageOpps.length}
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-mono text-[#8EB69B]">
+                    R$ {stageTotal.toLocaleString('pt-BR')}
+                  </span>
+                </div>
+
+                {/* Lista de Cards da Coluna */}
+                <div className="p-3 space-y-3 flex-1 overflow-y-auto max-h-[68vh] min-h-[160px]">
+                  {stageOpps.map((opp) => {
+                    const leadData = opp.leads;
+                    const hasLead = Boolean(opp.lead_id && leadData);
+
+                    return (
+                      <div
+                        key={opp.id}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', opp.id);
+                        }}
+                        className="p-3.5 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.22)] cursor-grab active:cursor-grabbing transition-all group shadow-sm flex flex-col justify-between space-y-2.5"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-1.5 mb-1">
+                            <span className="text-xs font-semibold text-[#E7ECE8] font-heading leading-snug">
+                              {opp.title}
+                            </span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => handleOpenEditModal(opp, e)}
+                                className="p-1 rounded hover:bg-[#07100F] text-[#9BA6A0] hover:text-[#F1F9A1] transition-colors"
+                                title="Editar oportunidade"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeletingOppId(deletingOppId === opp.id ? null : opp.id);
+                                }}
+                                className="p-1 rounded hover:bg-[#07100F] text-[#9BA6A0] hover:text-red-400 transition-colors"
+                                title="Excluir oportunidade"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Dados vinculados do Lead (LEFT JOIN seguro mesmo com company_id/lead_id NULL) */}
+                          <div className="space-y-0.5 mt-1">
+                            {hasLead ? (
+                              <>
+                                <div className="flex items-center gap-1 text-[11px] text-[#8EB69B]">
+                                  <Building2 className="w-3 h-3 shrink-0" />
+                                  <span className="truncate">
+                                    {leadData?.company_name || leadData?.name}
+                                  </span>
+                                </div>
+                                {leadData?.name && (
+                                  <div className="flex items-center gap-1 text-[10px] text-[#9BA6A0]">
+                                    <User className="w-3 h-3 shrink-0" />
+                                    <span className="truncate">{leadData.name}</span>
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <div className="text-[10px] text-[#65706A] italic">
+                                Sem lead vinculado
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Confirmação rápida de exclusão */}
+                          {deletingOppId === opp.id && (
+                            <div className="mt-2 p-2 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center justify-between gap-2">
+                              <span className="text-[10px] text-red-300 font-medium">
+                                Excluir do Supabase?
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDeleteOpp(opp.id, e)}
+                                  className="px-2 py-0.5 rounded bg-red-500 text-[#07100F] text-[10px] font-semibold hover:bg-red-400"
+                                >
+                                  Sim
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeletingOppId(null);
+                                  }}
+                                  className="px-2 py-0.5 rounded bg-[#07100F] text-[#9BA6A0] text-[10px] hover:text-[#E7ECE8]"
+                                >
+                                  Não
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="pt-2 border-t border-[rgba(218,241,222,0.05)] flex items-center justify-between">
+                          <div>
+                            <span className="text-[10px] text-[#65706A] block">Valor Estimado</span>
+                            <span className="text-xs font-semibold text-[#F1F9A1] font-mono">
+                              R$ {(Number(opp.estimated_value) || 0).toLocaleString('pt-BR')}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] font-mono text-[#9BA6A0] mr-1">
+                              {opp.probability ?? 0}%
+                            </span>
+                            {stageIndex > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => moveStageDirection(opp, 'prev')}
+                                className="p-1 rounded hover:bg-[#07100F] text-[#9BA6A0] hover:text-[#E7ECE8]"
+                                title="Etapa anterior"
+                              >
+                                <ArrowLeft className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {stageIndex < stages.length - 1 && (
+                              <button
+                                type="button"
+                                onClick={() => moveStageDirection(opp, 'next')}
+                                className="p-1 rounded hover:bg-[#07100F] text-[#9BA6A0] hover:text-[#F1F9A1]"
+                                title="Próxima etapa"
+                              >
+                                <ArrowRight className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {stageOpps.length === 0 && (
+                    <div className="h-28 rounded-xl border border-dashed border-[rgba(218,241,222,0.06)] flex items-center justify-center text-[11px] text-[#65706A] text-center px-3">
+                      Arraste um card para {stage.name}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* MODO LISTA (Usa exatamente os mesmos dados reais do Supabase) */}
       {viewMode === 'lista' && (
         <div className="space-y-4">
-          {/* Filtros por Etapa + Busca */}
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-1.5">
               <button
@@ -313,23 +755,23 @@ export default function PipelinePage() {
                 </span>
               </button>
 
-              {STAGES.map((stage) => {
-                const count = opportunities.filter(
-                  (o) =>
-                    o.stage_slug === stage.slug ||
-                    (stage.slug === 'proposta' && o.stage_slug === 'negociacao')
-                ).length;
+              {stages.map((stage) => {
+                const count = opportunities.filter((o) => o.stage_id === stage.id).length;
                 return (
                   <button
-                    key={stage.slug}
+                    key={stage.id}
                     type="button"
-                    onClick={() => setSelectedStageFilter(stage.slug)}
+                    onClick={() => setSelectedStageFilter(stage.id)}
                     className={`px-3 py-1.5 rounded-xl text-xs font-heading transition-all flex items-center gap-1.5 border ${
-                      selectedStageFilter === stage.slug
+                      selectedStageFilter === stage.id
                         ? 'bg-[#10201E] text-[#F1F9A1] border-[rgba(241,249,161,0.25)] font-medium'
                         : 'bg-[#0C1A19] text-[#9BA6A0] border-[rgba(218,241,222,0.06)] hover:text-[#E7ECE8]'
                     }`}
                   >
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: stage.color || '#8EB69B' }}
+                    />
                     <span>{stage.name}</span>
                     <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#07100F] text-[#9BA6A0]">
                       {count}
@@ -343,7 +785,7 @@ export default function PipelinePage() {
               <Search className="w-3.5 h-3.5 text-[#8EB69B] absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Buscar empresa, contato, serviço..."
+                placeholder="Buscar oportunidade ou lead..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#65706A] focus:outline-none focus:border-[#8EB69B]"
@@ -351,149 +793,92 @@ export default function PipelinePage() {
             </div>
           </div>
 
-          {/* Tabela em Lista do Pipeline */}
           <div className="bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] rounded-2xl overflow-hidden shadow-sm">
             {filteredListOpps.length === 0 ? (
               <div className="p-12 text-center text-xs text-[#9BA6A0]">
-                Nenhum lead/oportunidade encontrado nesta etapa do Pipeline.
+                Nenhuma oportunidade encontrada.
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="border-b border-[rgba(218,241,222,0.06)] bg-[#07100F] text-[11px] font-mono text-[#65706A] uppercase tracking-wider">
-                      <th className="py-3.5 px-4">Empresa / Lead</th>
-                      <th className="py-3.5 px-4">Escopo &amp; Serviços</th>
-                      <th className="py-3.5 px-4">Etapa no Pipeline</th>
-                      <th className="py-3.5 px-4">Temperatura</th>
-                      <th className="py-3.5 px-4">Valor do Projeto</th>
+                      <th className="py-3.5 px-4">Título da Oportunidade</th>
+                      <th className="py-3.5 px-4">Lead Vinculado</th>
+                      <th className="py-3.5 px-4">Etapa (stage_id)</th>
+                      <th className="py-3.5 px-4">Status</th>
+                      <th className="py-3.5 px-4">Valor Estimado</th>
                       <th className="py-3.5 px-4 text-right">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[rgba(218,241,222,0.05)]">
                     {filteredListOpps.map((opp) => {
-                      const currentSlug =
-                        opp.stage_slug === 'negociacao' ? 'proposta' : opp.stage_slug;
-
+                      const leadData = opp.leads;
                       return (
                         <tr
                           key={opp.id}
                           className="hover:bg-[#10201E]/50 transition-colors group"
                         >
-                          {/* Empresa / Contato */}
                           <td className="py-3.5 px-4">
                             <div className="font-semibold text-[#E7ECE8] font-heading text-sm">
-                              {opp.company_name}
+                              {opp.title}
                             </div>
-                            <div className="text-[11px] text-[#9BA6A0]">
-                              {opp.lead_name || 'Contato Principal'}
-                            </div>
-                            {currentSlug === 'projeto_em_andamento' && (
-                              <Link
-                                href="/tarefas"
-                                className="inline-flex items-center gap-1 text-[10px] font-mono text-[#8EB69B] hover:text-[#F1F9A1] mt-1"
-                              >
-                                <CheckCircle2 className="w-3 h-3" />
-                                <span>Ver checklist de 4 etapas em Tarefas →</span>
-                              </Link>
-                            )}
-                            {currentSlug === 'fechado' && (
-                              <div className="text-[10px] font-mono text-[#8EB69B] mt-1">
-                                ✓ Sincronizado em Clientes &amp; Financeiro
-                              </div>
-                            )}
                           </td>
 
-                          {/* Escopo & Serviços */}
                           <td className="py-3.5 px-4">
-                            <div className="text-[#E7ECE8] font-medium">{opp.title}</div>
-                            {opp.services && opp.services.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {opp.services.map((s, idx) => (
-                                  <span
-                                    key={idx}
-                                    className="text-[10px] px-1.5 py-0.5 rounded bg-[#10201E] text-[#9BA6A0] border border-[rgba(218,241,222,0.06)]"
-                                  >
-                                    {s}
-                                  </span>
-                                ))}
+                            {opp.lead_id && leadData ? (
+                              <div>
+                                <div className="text-[#E7ECE8] font-medium">
+                                  {leadData.company_name || leadData.name}
+                                </div>
+                                <div className="text-[11px] text-[#9BA6A0]">
+                                  {leadData.name}
+                                </div>
                               </div>
+                            ) : (
+                              <span className="text-[#65706A] italic">Sem lead vinculado</span>
                             )}
                           </td>
 
-                          {/* Etapa (Select direto para mudar etapa com 1 clique) */}
                           <td className="py-3.5 px-4">
                             <select
-                              value={currentSlug}
-                              onChange={(e) => setStage(opp.id, e.target.value)}
-                              className={`px-2.5 py-1.5 rounded-xl text-xs font-medium border focus:outline-none cursor-pointer transition-all ${getStageBadgeColor(
-                                currentSlug
-                              )}`}
+                              value={opp.stage_id || ''}
+                              onChange={(e) => handleStageChange(opp.id, e.target.value)}
+                              className="px-2.5 py-1.5 rounded-xl text-xs font-medium bg-[#10201E] text-[#E7ECE8] border border-[rgba(218,241,222,0.12)] focus:outline-none cursor-pointer"
                             >
-                              {STAGES.map((st) => (
+                              {stages.map((st) => (
                                 <option
-                                  key={st.slug}
-                                  value={st.slug}
+                                  key={st.id}
+                                  value={st.id}
                                   className="bg-[#0C1A19] text-[#E7ECE8]"
                                 >
                                   {st.name}
                                 </option>
                               ))}
                             </select>
-
-                            {currentSlug === 'proposta' && (
-                              <div className="flex items-center gap-1 text-[10px] text-[#F1F9A1] font-mono mt-1">
-                                <Clock className="w-3 h-3" />
-                                <span>
-                                  {(() => {
-                                    const entered = opp.stage_entered_at
-                                      ? new Date(opp.stage_entered_at).getTime()
-                                      : Date.now();
-                                    const elapsedHours = Math.floor(
-                                      (Date.now() - entered) / (1000 * 60 * 60)
-                                    );
-                                    const remaining = Math.max(0, 24 - elapsedHours);
-                                    return remaining > 0
-                                      ? `${remaining}h p/ Follow-up`
-                                      : 'Indo p/ Follow-up';
-                                  })()}
-                                </span>
-                              </div>
-                            )}
                           </td>
 
-                          {/* Temperatura & Score */}
                           <td className="py-3.5 px-4">
-                            <div className="flex items-center gap-1.5">
-                              <Badge temperature={opp.temperature}>
-                                {opp.temperature === 'quente' && '🔥 Quente'}
-                                {opp.temperature === 'morno' && '● Morno'}
-                                {opp.temperature === 'frio' && '○ Frio'}
-                              </Badge>
-                              <span className="text-[11px] font-mono text-[#9BA6A0]">
-                                ({opp.score} pts)
-                              </span>
-                            </div>
+                            <span className="px-2 py-0.5 rounded-full text-[11px] font-mono bg-[#10201E] text-[#8EB69B] border border-[rgba(218,241,222,0.08)]">
+                              {opp.status || 'aberta'}
+                            </span>
                           </td>
 
-                          {/* Valor */}
                           <td className="py-3.5 px-4">
                             <div className="text-sm font-semibold font-mono text-[#F1F9A1]">
-                              R$ {(opp.estimated_value || 0).toLocaleString('pt-BR')}
+                              R$ {(Number(opp.estimated_value) || 0).toLocaleString('pt-BR')}
                             </div>
                             <div className="text-[10px] font-mono text-[#65706A]">
-                              {opp.probability}% probabilidade
+                              {opp.probability ?? 0}% probabilidade
                             </div>
                           </td>
 
-                          {/* Ações (Editar e Excluir) */}
                           <td className="py-3.5 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
                               <button
                                 type="button"
                                 onClick={(e) => handleOpenEditModal(opp, e)}
                                 className="px-2.5 py-1.5 rounded-xl bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#F1F9A1] text-xs flex items-center gap-1 transition-all"
-                                title="Editar lead"
                               >
                                 <Pencil className="w-3.5 h-3.5" />
                                 <span>Editar</span>
@@ -527,7 +912,6 @@ export default function PipelinePage() {
                                     setDeletingOppId(opp.id);
                                   }}
                                   className="p-1.5 rounded-xl bg-[#10201E] hover:bg-red-500/20 border border-[rgba(218,241,222,0.06)] text-[#65706A] hover:text-red-400 transition-colors"
-                                  title="Excluir do Pipeline"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
@@ -545,332 +929,243 @@ export default function PipelinePage() {
         </div>
       )}
 
-      {/* MODO KANBAN (COLUNAS) */}
-      {viewMode === 'kanban' && (
-        <div className="flex gap-4 overflow-x-auto pb-6 pt-1">
-          {STAGES.map((stage, stageIndex) => {
-            const stageOpps = opportunities.filter(
-              (o) => o.stage_slug === stage.slug || (stage.slug === 'proposta' && o.stage_slug === 'negociacao')
-            );
-            const stageTotal = stageOpps.reduce((acc, o) => acc + (o.estimated_value || 0), 0);
-
-            return (
-              <div
-                key={stage.slug}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const oppId = e.dataTransfer.getData('text/plain');
-                  if (oppId) setStage(oppId, stage.slug);
-                }}
-                className="w-72 shrink-0 flex flex-col rounded-2xl bg-[#0C1A19]/70 border border-[rgba(218,241,222,0.07)] hover:border-[rgba(218,241,222,0.18)] transition-all overflow-hidden"
-              >
-                {/* Header da Coluna */}
-                <div className="p-3.5 border-b border-[rgba(218,241,222,0.06)] bg-[#07100F]/60 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-[#E7ECE8] font-heading">
-                      {stage.name}
-                    </span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[#10201E] text-[#9BA6A0]">
-                      {stageOpps.length}
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-mono text-[#8EB69B]">
-                    R$ {stageTotal.toLocaleString('pt-BR')}
-                  </span>
-                </div>
-
-                {/* Lista de Cards da Coluna */}
-                <div className="p-3 space-y-3 flex-1 overflow-y-auto max-h-[68vh] min-h-[140px]">
-                  {stageOpps.map((opp) => (
-                    <div
-                      key={opp.id}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('text/plain', opp.id);
-                      }}
-                      className="p-3.5 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] hover:border-[rgba(218,241,222,0.22)] cursor-grab active:cursor-grabbing transition-all group shadow-sm flex flex-col justify-between space-y-2.5"
-                    >
-                      <div>
-                        <div className="flex items-start justify-between gap-1.5 mb-1">
-                          <span className="text-xs font-semibold text-[#E7ECE8] font-heading leading-snug">
-                            {opp.company_name}
-                          </span>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <Badge temperature={opp.temperature} className="text-[9px] py-0 px-1">
-                              {opp.score}
-                            </Badge>
-                            <button
-                              type="button"
-                              onClick={(e) => handleOpenEditModal(opp, e)}
-                              className="p-1 rounded-lg bg-[#07100F]/70 hover:bg-[#163832] text-[#9BA6A0] hover:text-[#F1F9A1] transition-colors"
-                              title="Editar lead / oportunidade"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                            {deletingOppId === opp.id ? (
-                              <div className="flex items-center gap-1 bg-red-500/15 border border-red-500/30 rounded-lg px-1.5 py-0.5">
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleDeleteOpp(opp.id, e)}
-                                  className="text-[9px] font-semibold text-red-400 hover:text-red-300"
-                                >
-                                  Excluir
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setDeletingOppId(null);
-                                  }}
-                                  className="text-[9px] text-[#9BA6A0] hover:text-[#E7ECE8]"
-                                >
-                                  Não
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setDeletingOppId(opp.id);
-                                }}
-                                className="p-1 rounded-lg bg-[#07100F]/70 hover:bg-red-500/20 text-[#65706A] hover:text-red-400 transition-colors"
-                                title="Excluir do Pipeline"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        <p className="text-[11px] text-[#9BA6A0] leading-snug truncate">
-                          {opp.title}
-                        </p>
-
-                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-[rgba(218,241,222,0.04)]">
-                          <span className="text-xs font-semibold font-mono text-[#F1F9A1]">
-                            R$ {(opp.estimated_value || 0).toLocaleString('pt-BR')}
-                          </span>
-                          <span className="text-[10px] text-[#65706A]">
-                            {opp.probability}% prob.
-                          </span>
-                        </div>
-                      </div>
-
-                      {stage.slug === 'proposta' && (
-                        <div className="flex items-center gap-1.5 text-[10px] text-[#F1F9A1] bg-[#F1F9A1]/10 px-2 py-1 rounded-md border border-[#F1F9A1]/20 font-mono">
-                          <Clock className="w-3 h-3 text-[#F1F9A1] shrink-0" />
-                          <span>
-                            {(() => {
-                              const entered = opp.stage_entered_at ? new Date(opp.stage_entered_at).getTime() : Date.now();
-                              const elapsedHours = Math.floor((Date.now() - entered) / (1000 * 60 * 60));
-                              const remaining = Math.max(0, 24 - elapsedHours);
-                              return remaining > 0 ? `${remaining}h restantes para Follow-up` : 'Regra 24h: Indo para Follow-up';
-                            })()}
-                          </span>
-                        </div>
-                      )}
-
-                      {stage.slug === 'projeto_em_andamento' && (
-                        <Link
-                          href="/tarefas"
-                          className="flex items-center justify-between gap-1.5 text-[10px] text-[#8EB69B] bg-[#8EB69B]/10 hover:bg-[#8EB69B]/15 px-2 py-1 rounded-md border border-[#8EB69B]/20 font-mono transition-colors"
-                        >
-                          <span>Checklist de 4 etapas em Tarefas</span>
-                          <span>→</span>
-                        </Link>
-                      )}
-
-                      {stage.slug === 'fechado' && (
-                        <div className="flex items-center gap-1.5 text-[10px] text-[#8EB69B] bg-[#8EB69B]/10 px-2 py-1 rounded-md border border-[#8EB69B]/20 font-mono">
-                          <span>✓ Sincronizado: Clientes &amp; Finanças</span>
-                        </div>
-                      )}
-
-                      {opp.services && opp.services.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {opp.services.map((s, idx) => (
-                            <span
-                              key={idx}
-                              className="text-[9px] px-1.5 py-0.5 rounded bg-[#07100F] text-[#9BA6A0] border border-[rgba(218,241,222,0.04)] truncate max-w-[130px]"
-                            >
-                              {s}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {opp.n8n_automated && (
-                        <div className="flex items-center gap-1 text-[10px] text-[#8EB69B] font-mono">
-                          <Zap className="w-3 h-3 text-[#8EB69B]" />
-                          <span>Automação n8n ativa</span>
-                        </div>
-                      )}
-
-                      <div className="flex items-center justify-between pt-1 text-xs">
-                        <button
-                          type="button"
-                          onClick={() => moveStage(opp.id, 'prev')}
-                          disabled={stageIndex === 0}
-                          className="p-1 rounded text-[#65706A] hover:text-[#E7ECE8] disabled:opacity-20 hover:bg-[#07100F] transition-all"
-                          title="Etapa anterior"
-                        >
-                          <ArrowLeft className="w-3.5 h-3.5" />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={(e) => handleOpenEditModal(opp, e)}
-                          className="text-[10px] text-[#8EB69B] hover:text-[#F1F9A1] transition-colors font-medium"
-                        >
-                          Editar lead
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => moveStage(opp.id, 'next')}
-                          disabled={stageIndex === STAGES.length - 1}
-                          className="p-1 rounded text-[#65706A] hover:text-[#E7ECE8] disabled:opacity-20 hover:bg-[#07100F] transition-all"
-                          title="Próxima etapa"
-                        >
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-
-                  {stageOpps.length === 0 && (
-                    <div className="h-24 flex items-center justify-center text-[11px] text-[#65706A] border border-dashed border-[rgba(218,241,222,0.04)] rounded-xl">
-                      Arraste cards para cá
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Modal Editar Lead / Oportunidade no Pipeline */}
+      {/* Modal: + Nova Oportunidade (INSERT direto em public.opportunities) */}
       <Modal
-        isOpen={!!editingOpp}
-        onClose={() => setEditingOpp(null)}
-        title="Editar Lead no Pipeline"
-        subtitle="Atualize os dados, valor do projeto, serviços ou estágio desta oportunidade."
+        isOpen={isNewOppModalOpen}
+        onClose={() => setIsNewOppModalOpen(false)}
+        title="Nova Oportunidade"
+        subtitle="Salva diretamente em public.opportunities no Supabase."
       >
-        <form onSubmit={handleSaveEditOpp} className="space-y-4 text-xs">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Nome da Empresa *</label>
-              <input
-                type="text"
-                required
-                value={editCompany}
-                onChange={(e) => setEditCompany(e.target.value)}
-                placeholder="Ex: Evelyn Alcaires Advocacia"
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
-              />
-            </div>
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Nome do Contato</label>
-              <input
-                type="text"
-                value={editContact}
-                onChange={(e) => setEditContact(e.target.value)}
-                placeholder="Ex: Dra. Evelyn"
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
-              />
-            </div>
-          </div>
-
+        <form onSubmit={handleCreateOpp} className="space-y-4 text-xs">
           <div>
-            <label className="block text-[#9BA6A0] mb-1 font-medium">Título / Escopo Principal *</label>
+            <label className="block text-[#9BA6A0] mb-1 font-medium">
+              Título da Oportunidade *
+            </label>
             <input
               type="text"
               required
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              placeholder="Ex: Landing Page + Automação"
+              placeholder="Ex: Website Institucional + Automação WhatsApp"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
               className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Valor do Projeto (R$)</label>
-              <input
-                type="number"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                placeholder="Ex: 1199"
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
-              />
-            </div>
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Estágio no Pipeline</label>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">
+                Lead Vinculado (Opcional)
+              </label>
               <select
-                value={editStage}
-                onChange={(e) => setEditStage(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+                value={newLeadId}
+                onChange={(e) => {
+                  const selectedId = e.target.value;
+                  setNewLeadId(selectedId);
+                  if (selectedId && !newTitle.trim()) {
+                    const found = leadsList.find((l) => l.id === selectedId);
+                    if (found) {
+                      setNewTitle(`Oportunidade - ${found.company_name || found.name}`);
+                    }
+                  }
+                }}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
               >
-                {STAGES.map((s) => (
-                  <option key={s.slug} value={s.slug}>
-                    {s.name}
+                <option value="">Sem lead vinculado (NULL)</option>
+                {leadsList.map((lead) => (
+                  <option key={lead.id} value={lead.id}>
+                    {lead.company_name || lead.name} {lead.name ? `(${lead.name})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">
+                Etapa do Pipeline *
+              </label>
+              <select
+                value={newStageId}
+                onChange={(e) => setNewStageId(e.target.value)}
+                required
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+              >
+                {stages.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {st.name}
                   </option>
                 ))}
               </select>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Temperatura</label>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">
+                Valor Estimado (R$)
+              </label>
+              <input
+                type="number"
+                placeholder="3500"
+                value={newValue}
+                onChange={(e) => setNewValue(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">
+                Probabilidade (%)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={newProbability}
+                onChange={(e) => setNewProbability(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">Status</label>
               <select
-                value={editTemperature}
-                onChange={(e) => setEditTemperature(e.target.value as Temperature)}
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+                value={newStatus}
+                onChange={(e) => setNewStatus(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
               >
-                <option value="quente">🔥 Quente</option>
-                <option value="morno">● Morno</option>
-                <option value="frio">○ Frio</option>
+                <option value="aberta">Aberta</option>
+                <option value="em_andamento">Em andamento</option>
+                <option value="ganha">Ganha</option>
+                <option value="perdida">Perdida</option>
               </select>
             </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-[rgba(218,241,222,0.06)]">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setIsNewOppModalOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" variant="primary" size="sm" disabled={isSavingNew}>
+              {isSavingNew ? 'Salvando no Supabase...' : 'Criar Oportunidade'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Editar Oportunidade */}
+      <Modal
+        isOpen={Boolean(editingOpp)}
+        onClose={() => setEditingOpp(null)}
+        title="Editar Oportunidade"
+        subtitle="Atualiza diretamente o registro em public.opportunities."
+      >
+        <form onSubmit={handleSaveEditOpp} className="space-y-4 text-xs">
+          <div>
+            <label className="block text-[#9BA6A0] mb-1 font-medium">
+              Título da Oportunidade *
+            </label>
+            <input
+              type="text"
+              required
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Probabilidade (%)</label>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">
+                Lead Vinculado
+              </label>
+              <select
+                value={editLeadId}
+                onChange={(e) => setEditLeadId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+              >
+                <option value="">Sem lead vinculado (NULL)</option>
+                {leadsList.map((lead) => (
+                  <option key={lead.id} value={lead.id}>
+                    {lead.company_name || lead.name} {lead.name ? `(${lead.name})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">
+                Etapa do Pipeline
+              </label>
+              <select
+                value={editStageId}
+                onChange={(e) => setEditStageId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+              >
+                {stages.map((st) => (
+                  <option key={st.id} value={st.id}>
+                    {st.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">
+                Valor Estimado (R$)
+              </label>
+              <input
+                type="number"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">
+                Probabilidade (%)
+              </label>
               <input
                 type="number"
                 min={0}
                 max={100}
                 value={editProbability}
                 onChange={(e) => setEditProbability(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
               />
+            </div>
+
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">Status</label>
+              <select
+                value={editStatus}
+                onChange={(e) => setEditStatus(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+              >
+                <option value="aberta">Aberta</option>
+                <option value="em_andamento">Em andamento</option>
+                <option value="ganha">Ganha</option>
+                <option value="perdida">Perdida</option>
+              </select>
             </div>
           </div>
 
-          <div>
-            <label className="block text-[#9BA6A0] mb-1 font-medium">
-              Serviços (separados por vírgula)
-            </label>
-            <input
-              type="text"
-              value={editServices}
-              onChange={(e) => setEditServices(e.target.value)}
-              placeholder="Ex: Site Institucional, Automação WhatsApp"
-              className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
-            />
-          </div>
-
-          <div className="flex items-center justify-between pt-4 border-t border-[rgba(218,241,222,0.06)]">
+          <div className="flex items-center justify-between pt-3 border-t border-[rgba(218,241,222,0.06)]">
             {editingOpp && (
               <button
                 type="button"
-                onClick={() => handleDeleteOpp(editingOpp.id)}
-                className="px-3 py-1.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 text-xs font-medium flex items-center gap-1.5 transition-all"
+                onClick={(e) => handleDeleteOpp(editingOpp.id, e)}
+                className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 text-red-400 text-xs flex items-center gap-1.5 transition-all"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Excluir do Pipeline</span>
+                <span>Excluir Oportunidade</span>
               </button>
             )}
             <div className="flex items-center gap-2 ml-auto">
@@ -882,94 +1177,10 @@ export default function PipelinePage() {
               >
                 Cancelar
               </Button>
-              <Button type="submit" variant="primary" size="sm">
-                Salvar Alterações
+              <Button type="submit" variant="primary" size="sm" disabled={isSavingEdit}>
+                {isSavingEdit ? 'Salvando...' : 'Salvar Alterações'}
               </Button>
             </div>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Modal Nova Oportunidade */}
-      <Modal
-        isOpen={isNewOppModalOpen}
-        onClose={() => setIsNewOppModalOpen(false)}
-        title="Criar Nova Oportunidade"
-        subtitle="Adicione uma oportunidade com valor estimado e atribua a um estágio do funil."
-      >
-        <form onSubmit={handleCreateOpp} className="space-y-4 text-xs">
-          <div>
-            <label className="block text-[#9BA6A0] mb-1 font-medium">Título da Oportunidade *</label>
-            <input
-              type="text"
-              required
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              placeholder="Ex: Site Institucional + Bot WhatsApp"
-              className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Nome da Empresa *</label>
-              <input
-                type="text"
-                required
-                value={newCompany}
-                onChange={(e) => setNewCompany(e.target.value)}
-                placeholder="Ex: Clínica Alpha"
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Contato</label>
-              <input
-                type="text"
-                value={newContact}
-                onChange={(e) => setNewContact(e.target.value)}
-                placeholder="Ex: Dra. Mariana"
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Valor Estimado (R$)</label>
-              <input
-                type="number"
-                value={newValue}
-                onChange={(e) => setNewValue(e.target.value)}
-                placeholder="Ex: 4800"
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Estágio Inicial</label>
-              <select
-                value={newStage}
-                onChange={(e) => setNewStage(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
-              >
-                {STAGES.map((s) => (
-                  <option key={s.slug} value={s.slug}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-4 border-t border-[rgba(218,241,222,0.06)]">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setIsNewOppModalOpen(false)}
-            >
-              Cancelar
-            </Button>
-            <Button type="submit" variant="primary" size="sm">
-              Criar Oportunidade
-            </Button>
           </div>
         </form>
       </Modal>

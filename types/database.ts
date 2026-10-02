@@ -113,17 +113,21 @@ export interface PipelineStage {
   name: string;
   slug: string;
   display_order: number;
+  color?: string | null;
 }
 
 export interface Opportunity {
   id: string;
-  lead_id: string;
+  lead_id: string | null;
+  stage_id?: string;
+  company_id?: string | null;
   lead_name: string;
   company_name: string;
   stage_slug: string;
   title: string;
   estimated_value: number;
   probability: number;
+  status?: string;
   score: number;
   temperature: Temperature;
   priority: Priority;
@@ -134,6 +138,7 @@ export interface Opportunity {
   created_at?: string;
   updated_at?: string;
   stage_entered_at?: string;
+  leads?: Partial<Lead> | null;
 }
 
 export interface Client {

@@ -4,6 +4,7 @@ import {
   Client,
   Prospect,
   Opportunity,
+  PipelineStage,
   MonthlyClient,
   Proposal,
   Contract,
@@ -385,49 +386,167 @@ export class DatabaseService {
   }
 
   // ============================================================================
-  // OPORTUNIDADES / PIPELINE KANBAN
+  // PIPELINE STAGES & OPORTUNIDADES (public.pipeline_stages & public.opportunities)
   // ============================================================================
-  public async getOpportunities(): Promise<Opportunity[] | null> {
+  public async getPipelineStages(): Promise<PipelineStage[] | null> {
     if (!isSupabaseConfigured()) return null;
     try {
       const supabase = getSupabase();
-      const { data, error } = await supabase.from('opportunities').select('*');
-      if (error || !data) return null;
-      return data as Opportunity[];
-    } catch {
+      const { data, error } = await supabase
+        .from('pipeline_stages')
+        .select('id, name, slug, display_order, color')
+        .order('display_order', { ascending: true });
+      if (error || !data) {
+        if (error) console.error('Supabase getPipelineStages error:', error);
+        return null;
+      }
+      return data as PipelineStage[];
+    } catch (err) {
+      console.error('Supabase getPipelineStages exception:', err);
       return null;
     }
   }
 
-  public async insertOpportunity(opportunity: Opportunity): Promise<boolean> {
-    if (!isSupabaseConfigured()) return false;
+  public async getOpportunities(): Promise<Opportunity[] | null> {
+    if (!isSupabaseConfigured()) return null;
     try {
       const supabase = getSupabase();
-      const payload: any = { ...opportunity };
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      if (payload.id && !uuidRegex.test(payload.id)) {
-        delete payload.id;
+      const [stagesRes, oppsRes] = await Promise.all([
+        supabase
+          .from('pipeline_stages')
+          .select('id, name, slug, display_order, color')
+          .order('display_order', { ascending: true }),
+        supabase
+          .from('opportunities')
+          .select('*, leads(*)'),
+      ]);
+
+      if (oppsRes.error || !oppsRes.data) {
+        if (oppsRes.error) console.error('Supabase getOpportunities error:', oppsRes.error);
+        return null;
       }
-      const { data, error } = await supabase.from('opportunities').upsert([payload]).select();
-      if (!error && data && data.length > 0 && !opportunity.id) {
-        opportunity.id = data[0].id;
-      }
-      return !error;
-    } catch {
-      return false;
+
+      const stages = (stagesRes.data || []) as PipelineStage[];
+      const stageById = new Map(stages.map((s) => [s.id, s]));
+      const defaultStage = stages[0];
+
+      return oppsRes.data.map((row: any) => {
+        const rawLead = Array.isArray(row.leads) ? row.leads[0] : row.leads;
+        const parsedLead = rawLead ? parseLeadFromSupabase(rawLead) : null;
+        const matchedStage = row.stage_id ? stageById.get(row.stage_id) : defaultStage;
+
+        return {
+          id: row.id,
+          lead_id: row.lead_id || null,
+          stage_id: row.stage_id || matchedStage?.id,
+          company_id: row.company_id ?? null,
+          title: row.title || parsedLead?.company_name || 'Oportunidade',
+          estimated_value: Number(row.estimated_value) || 0,
+          probability: Number(row.probability) || 0,
+          status: row.status || 'aberta',
+          stage_slug: matchedStage?.slug || row.stage_slug || 'primeiro_contato',
+          lead_name: parsedLead?.name || row.lead_name || 'Contato Principal',
+          company_name: parsedLead?.company_name || row.company_name || row.title || 'Cliente',
+          score: parsedLead?.score ?? row.score ?? 80,
+          temperature: parsedLead?.temperature || row.temperature || 'quente',
+          priority: row.priority || 'alta',
+          services:
+            parsedLead?.services && parsedLead.services.length > 0
+              ? parsedLead.services
+              : Array.isArray(row.services)
+              ? row.services
+              : [],
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          stage_entered_at: row.updated_at || row.created_at,
+          leads: parsedLead,
+        } as Opportunity;
+      });
+    } catch (err) {
+      console.error('Supabase getOpportunities exception:', err);
+      return null;
     }
   }
 
-  public async updateOpportunityStage(id: string, stageSlug: string): Promise<boolean> {
-    if (!isSupabaseConfigured()) return false;
+  private async resolveStageId(stageIdOrSlug?: string): Promise<string | null> {
+    if (stageIdOrSlug && isValidUUID(stageIdOrSlug)) {
+      return stageIdOrSlug;
+    }
+    const stages = await this.getPipelineStages();
+    if (!stages || stages.length === 0) return null;
+    if (stageIdOrSlug) {
+      const norm = stageIdOrSlug.trim().toLowerCase();
+      const bySlug = stages.find(
+        (s) =>
+          (s.slug || '').toLowerCase() === norm ||
+          (s.name || '').toLowerCase() === norm
+      );
+      if (bySlug) return bySlug.id;
+    }
+    return stages[0].id;
+  }
+
+  public async insertOpportunity(opportunity: Opportunity): Promise<Opportunity | null> {
+    if (!isSupabaseConfigured()) return null;
     try {
       const supabase = getSupabase();
+      const stageId = await this.resolveStageId(opportunity.stage_id || opportunity.stage_slug);
+      if (!stageId) {
+        console.error('Supabase insertOpportunity: Nenhuma etapa encontrada em public.pipeline_stages');
+        return null;
+      }
+
+      const payload: Record<string, any> = {
+        lead_id: isValidUUID(opportunity.lead_id) ? opportunity.lead_id : null,
+        stage_id: stageId,
+        company_id: isValidUUID(opportunity.company_id) ? opportunity.company_id : null,
+        title: opportunity.title || opportunity.company_name || 'Nova Oportunidade',
+        estimated_value: Number(opportunity.estimated_value) || 0,
+        probability: Number(opportunity.probability) || 0,
+        status: opportunity.status || 'aberta',
+      };
+
+      if (isValidUUID(opportunity.id)) {
+        payload.id = opportunity.id;
+      }
+
+      const { data, error } = await supabase
+        .from('opportunities')
+        .insert([payload])
+        .select('*, leads(*)')
+        .single();
+
+      if (error) {
+        console.error('Supabase insertOpportunity error:', error);
+        return null;
+      }
+
+      if (data) {
+        opportunity.id = data.id;
+        opportunity.stage_id = data.stage_id;
+      }
+      return data as any;
+    } catch (err) {
+      console.error('Supabase insertOpportunity exception:', err);
+      return null;
+    }
+  }
+
+  public async updateOpportunityStage(id: string, stageIdOrSlug: string): Promise<boolean> {
+    if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
+    try {
+      const supabase = getSupabase();
+      const stageId = await this.resolveStageId(stageIdOrSlug);
+      if (!stageId) return false;
+
       const { error } = await supabase
         .from('opportunities')
-        .update({ stage_slug: stageSlug, updated_at: new Date().toISOString() })
+        .update({ stage_id: stageId })
         .eq('id', id);
+      if (error) console.error('Supabase updateOpportunityStage error:', error);
       return !error;
-    } catch {
+    } catch (err) {
+      console.error('Supabase updateOpportunityStage exception:', err);
       return false;
     }
   }
@@ -436,22 +555,45 @@ export class DatabaseService {
     if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
     try {
       const supabase = getSupabase();
-      const payload: any = { ...data, updated_at: new Date().toISOString() };
-      delete payload.id;
+      const payload: Record<string, any> = {};
+
+      if (data.stage_id && isValidUUID(data.stage_id)) {
+        payload.stage_id = data.stage_id;
+      } else if (data.stage_slug) {
+        const resolved = await this.resolveStageId(data.stage_slug);
+        if (resolved) payload.stage_id = resolved;
+      }
+      if (data.lead_id !== undefined) {
+        payload.lead_id = isValidUUID(data.lead_id) ? data.lead_id : null;
+      }
+      if (data.company_id !== undefined) {
+        payload.company_id = isValidUUID(data.company_id) ? data.company_id : null;
+      }
+      if (data.title !== undefined) payload.title = data.title;
+      if (data.estimated_value !== undefined) payload.estimated_value = Number(data.estimated_value) || 0;
+      if (data.probability !== undefined) payload.probability = Number(data.probability) || 0;
+      if (data.status !== undefined) payload.status = data.status;
+
+      if (Object.keys(payload).length === 0) return true;
+
       const { error } = await supabase.from('opportunities').update(payload).eq('id', id);
+      if (error) console.error('Supabase updateOpportunity error:', error);
       return !error;
-    } catch {
+    } catch (err) {
+      console.error('Supabase updateOpportunity exception:', err);
       return false;
     }
   }
 
   public async deleteOpportunity(id: string): Promise<boolean> {
-    if (!isSupabaseConfigured()) return false;
+    if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
     try {
       const supabase = getSupabase();
       const { error } = await supabase.from('opportunities').delete().eq('id', id);
+      if (error) console.error('Supabase deleteOpportunity error:', error);
       return !error;
-    } catch {
+    } catch (err) {
+      console.error('Supabase deleteOpportunity exception:', err);
       return false;
     }
   }

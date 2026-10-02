@@ -62,7 +62,7 @@ class CrmService {
   private niches: Niche[] = [...INITIAL_NICHES];
   private sequences: MessageSequence[] = [...INITIAL_SEQUENCES];
   private leads: Lead[] = [...INITIAL_LEADS];
-  private opportunities: Opportunity[] = [...INITIAL_OPPORTUNITIES];
+  private opportunities: Opportunity[] = [];
   private clients: Client[] = [...INITIAL_CLIENTS];
   private proposals: Proposal[] = [...INITIAL_PROPOSALS];
   private contracts: Contract[] = [...INITIAL_CONTRATOS];
@@ -96,6 +96,7 @@ class CrmService {
 
   private saveToLocalStorage(key: string, data: any): void {
     if (typeof window === 'undefined') return;
+    if (key === 'opps') return; // Oportunidades são gerenciadas 100% via Supabase
     try {
       localStorage.setItem(`evocrm_${key}`, JSON.stringify(data));
     } catch (e) {
@@ -106,6 +107,7 @@ class CrmService {
   private loadFromLocalStorage(): void {
     if (typeof window === 'undefined') return;
     try {
+      localStorage.removeItem('evocrm_opps');
       const cachedLeads = localStorage.getItem('evocrm_leads');
       if (cachedLeads) {
         const parsed = JSON.parse(cachedLeads);
@@ -114,18 +116,6 @@ class CrmService {
             ...l,
             name: l.name || 'Contato',
             company_name: l.company_name || l.name || 'Empresa',
-          }));
-        }
-      }
-      const cachedOpps = localStorage.getItem('evocrm_opps');
-      if (cachedOpps) {
-        const parsed = JSON.parse(cachedOpps);
-        if (Array.isArray(parsed)) {
-          this.opportunities = parsed.map((o: any) => ({
-            ...o,
-            title: o.title || 'Oportunidade',
-            company_name: o.company_name || o.lead_name || 'Cliente',
-            lead_name: o.lead_name || o.company_name || 'Contato',
           }));
         }
       }
@@ -344,12 +334,9 @@ class CrmService {
         this.leads.forEach(l => dbService.insertLead(l));
       }
       if (prospects && prospects.length > 0) { this.prospects = prospects; changed = true; }
-      const hasLocalOpps =
-        typeof window !== 'undefined' && localStorage.getItem('evocrm_opps') !== null;
-      if (!hasLocalOpps && opps && opps.length > 0) { 
-        this.opportunities = opps; 
-        this.saveToLocalStorage('opps', this.opportunities);
-        changed = true; 
+      if (opps !== null) {
+        this.opportunities = opps;
+        changed = true;
       }
       if (proposals && proposals.length > 0) { this.proposals = proposals; changed = true; }
       if (contracts && contracts.length > 0) { this.contracts = contracts; changed = true; }
@@ -910,6 +897,22 @@ class CrmService {
     }
   }
 
+  public setOpportunitiesFromSupabase(opps: Opportunity[]): void {
+    this.opportunities = opps;
+    this.notify();
+  }
+
+  public triggerStageSideEffects(opp: Opportunity, newStageSlug: string): void {
+    const slugNorm = (newStageSlug || '').toLowerCase();
+    if (slugNorm.includes('andamento') || slugNorm === 'projeto_em_andamento') {
+      this.handleOpportunityEnteredProjectInProgress(opp);
+      this.notify();
+    } else if (slugNorm.includes('fechado') || slugNorm.includes('ganho') || slugNorm === 'won') {
+      this.handleOpportunityClosed(opp);
+      this.notify();
+    }
+  }
+
   public updateOpportunityStage(id: string, newStageSlug: string): Opportunity | undefined {
     const opp = this.opportunities.find(o => o.id === id);
     if (opp) {
@@ -923,7 +926,6 @@ class CrmService {
         opp.probability = 90;
       }
       dbService.updateOpportunityStage(id, newStageSlug);
-      this.saveToLocalStorage('opps', this.opportunities);
 
       if (newStageSlug === 'projeto_em_andamento') {
         this.handleOpportunityEnteredProjectInProgress(opp);
