@@ -19,7 +19,37 @@ import {
   Pencil,
   Trash2,
   Building2,
+  FolderOpen,
+  FileText,
+  Key,
+  Palette,
+  Type,
+  ChevronDown,
+  Copy,
+  Eye,
+  EyeOff,
+  X,
 } from 'lucide-react';
+
+function extractHexColors(str?: string): string[] {
+  if (!str) return [];
+  const matches = str.match(/#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})\b/g);
+  return matches ? Array.from(new Set(matches)) : [];
+}
+
+function maskCredentials(text?: string): string {
+  if (!text) return '';
+  return text
+    .split('\n')
+    .map((line) => {
+      if (/password|senha|pass|secret|token/i.test(line) && line.includes(':')) {
+        const idx = line.indexOf(':');
+        return `${line.slice(0, idx + 1)} ••••••••••••`;
+      }
+      return line;
+    })
+    .join('\n');
+}
 
 function formatExternalUrl(url: string): string {
   const trimmed = url.trim();
@@ -63,6 +93,94 @@ export default function ProjetosPage() {
   const [pAmountContracted, setPAmountContracted] = useState('');
   const [pDeadline, setPDeadline] = useState('');
   const [pStatus, setPStatus] = useState<Project['status']>('em_desenvolvimento');
+
+  // Campos de Dados Técnicos & Briefing no Modal
+  const [pBriefingUrl, setPBriefingUrl] = useState('');
+  const [pDriveFolderUrl, setPDriveFolderUrl] = useState('');
+  const [pClientAccessNotes, setPClientAccessNotes] = useState('');
+  const [pColorPalette, setPColorPalette] = useState('');
+  const [pTypographyFonts, setPTypographyFonts] = useState('');
+
+  // Gaveta Retrátil de Dados Técnicos nos Cards
+  const [expandedTechnicalIds, setExpandedTechnicalIds] = useState<Record<string, boolean>>({});
+  const [revealedAccessIds, setRevealedAccessIds] = useState<Record<string, boolean>>({});
+
+  // Edição Rápida Inline dentro da Gaveta
+  const [editingTechProjectId, setEditingTechProjectId] = useState<string | null>(null);
+  const [techBriefingUrl, setTechBriefingUrl] = useState('');
+  const [techDriveUrl, setTechDriveUrl] = useState('');
+  const [techAccessNotes, setTechAccessNotes] = useState('');
+  const [techColorPalette, setTechColorPalette] = useState('');
+  const [techFonts, setTechFonts] = useState('');
+
+  // Toast de feedback
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3500);
+  };
+
+  const toggleTechnicalDrawer = (id: string) => {
+    setExpandedTechnicalIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  const toggleRevealAccess = (id: string) => {
+    setRevealedAccessIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  const startEditingTech = (proj: Project) => {
+    setEditingTechProjectId(proj.id);
+    setTechBriefingUrl(proj.briefing_url || '');
+    setTechDriveUrl(proj.drive_folder_url || '');
+    setTechAccessNotes(proj.client_access_notes || '');
+    setTechColorPalette(proj.color_palette || '');
+    setTechFonts(proj.typography_fonts || '');
+    setExpandedTechnicalIds((prev) => ({ ...prev, [proj.id]: true }));
+  };
+
+  const cancelEditingTech = () => {
+    setEditingTechProjectId(null);
+  };
+
+  const handleSaveTechInline = (projId: string) => {
+    crmService.updateProject(projId, {
+      briefing_url: techBriefingUrl.trim() || undefined,
+      drive_folder_url: techDriveUrl.trim() || undefined,
+      client_access_notes: techAccessNotes.trim() || undefined,
+      color_palette: techColorPalette.trim() || undefined,
+      typography_fonts: techFonts.trim() || undefined,
+    });
+    setEditingTechProjectId(null);
+    showToast('Dados técnicos atualizados com sucesso!');
+  };
+
+  const handleCopyText = async (text: string, label: string) => {
+    if (!text) return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      showToast(`${label} copiado para a área de transferência!`);
+    } catch {
+      showToast(`${label} copiado!`);
+    }
+  };
 
   // Modal Concluir Projeto
   const [completingProject, setCompletingProject] = useState<Project | null>(null);
@@ -149,6 +267,11 @@ export default function ProjetosPage() {
     setPAmountContracted('');
     setPDeadline(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
     setPStatus('em_desenvolvimento');
+    setPBriefingUrl('');
+    setPDriveFolderUrl('');
+    setPClientAccessNotes('');
+    setPColorPalette('');
+    setPTypographyFonts('');
     setIsNewProjectModalOpen(true);
   };
 
@@ -164,6 +287,11 @@ export default function ProjetosPage() {
     setPAmountContracted(proj.amount_contracted ? String(proj.amount_contracted) : '');
     setPDeadline(proj.deadline || '');
     setPStatus(proj.status);
+    setPBriefingUrl(proj.briefing_url || '');
+    setPDriveFolderUrl(proj.drive_folder_url || '');
+    setPClientAccessNotes(proj.client_access_notes || '');
+    setPColorPalette(proj.color_palette || '');
+    setPTypographyFonts(proj.typography_fonts || '');
     setIsNewProjectModalOpen(true);
   };
 
@@ -207,6 +335,11 @@ export default function ProjetosPage() {
         deadline: pDeadline || 'A definir',
         status: pStatus,
         progress_percentage: pStatus === 'concluido' ? 100 : existing?.progress_percentage ?? 0,
+        briefing_url: pBriefingUrl.trim() || undefined,
+        drive_folder_url: pDriveFolderUrl.trim() || undefined,
+        client_access_notes: pClientAccessNotes.trim() || undefined,
+        color_palette: pColorPalette.trim() || undefined,
+        typography_fonts: pTypographyFonts.trim() || undefined,
       });
     } else {
       const servicesList = (serviceNames.length > 0 ? serviceNames : ['Site Institucional']).map(
@@ -232,6 +365,11 @@ export default function ProjetosPage() {
         website_url: pWebsite.trim() || undefined,
         amount_contracted: pAmountContracted ? Number(pAmountContracted) : 0,
         amount_received: pAmountContracted ? Number(pAmountContracted) : 0,
+        briefing_url: pBriefingUrl.trim() || undefined,
+        drive_folder_url: pDriveFolderUrl.trim() || undefined,
+        client_access_notes: pClientAccessNotes.trim() || undefined,
+        color_palette: pColorPalette.trim() || undefined,
+        typography_fonts: pTypographyFonts.trim() || undefined,
       });
     }
 
@@ -467,6 +605,404 @@ export default function ProjetosPage() {
                           </div>
                         ))}
                       </div>
+
+                      {/* Gaveta Retrátil: Dados Técnicos & Briefing */}
+                      {(() => {
+                        const isExpanded = Boolean(expandedTechnicalIds[proj.id]);
+                        const isEditingThis = editingTechProjectId === proj.id;
+                        const isRevealed = Boolean(revealedAccessIds[proj.id]);
+                        const hasBriefing = Boolean(proj.briefing_url?.trim());
+                        const hasDrive = Boolean(proj.drive_folder_url?.trim());
+                        const hasAccess = Boolean(proj.client_access_notes?.trim());
+                        const hasColors = Boolean(proj.color_palette?.trim());
+                        const hasFonts = Boolean(proj.typography_fonts?.trim());
+                        const totalFilled = [hasBriefing, hasDrive, hasAccess, hasColors, hasFonts].filter(Boolean).length;
+                        const hexColors = extractHexColors(proj.color_palette);
+
+                        return (
+                          <div className="rounded-xl border border-[rgba(218,241,222,0.08)] bg-[#10201E]/70 overflow-hidden transition-all">
+                            {/* Barra / Gatilho de Abertura da Gaveta */}
+                            <button
+                              type="button"
+                              onClick={() => toggleTechnicalDrawer(proj.id)}
+                              className="w-full px-3.5 py-2.5 flex items-center justify-between text-left hover:bg-[#10201E] transition-colors group cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="p-1 rounded bg-[#07100F] border border-[rgba(218,241,222,0.08)] text-[#8EB69B]">
+                                  <FileText className="w-3.5 h-3.5" />
+                                </div>
+                                <span className="text-xs font-semibold text-[#E7ECE8] font-heading truncate">
+                                  Dados Técnicos & Briefing
+                                </span>
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                                    totalFilled > 0
+                                      ? 'bg-[#163832] text-[#8EB69B] border-[#8EB69B]/30'
+                                      : 'bg-[#07100F] text-[#65706A] border-[rgba(218,241,222,0.06)]'
+                                  }`}
+                                >
+                                  {totalFilled > 0 ? `${totalFilled}/5 preenchidos` : 'Pendente'}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-[11px] font-mono text-[#9BA6A0] group-hover:text-[#F1F9A1] transition-colors hidden sm:inline">
+                                  {isExpanded ? 'Recolher' : 'Ver Dados'}
+                                </span>
+                                <ChevronDown
+                                  className={`w-4 h-4 text-[#9BA6A0] transition-transform duration-200 ${
+                                    isExpanded ? 'rotate-180 text-[#F1F9A1]' : ''
+                                  }`}
+                                />
+                              </div>
+                            </button>
+
+                            {/* Conteúdo Retrátil da Gaveta */}
+                            {isExpanded && (
+                              <div className="p-3.5 border-t border-[rgba(218,241,222,0.06)] bg-[#07100F]/90 space-y-3.5 animate-in slide-in-from-top-1 duration-200">
+                                {isEditingThis ? (
+                                  /* MODO EDIÇÃO INLINE NA GAVETA */
+                                  <div className="space-y-3 text-xs">
+                                    <div className="flex items-center justify-between border-b border-[rgba(218,241,222,0.06)] pb-2">
+                                      <span className="text-xs font-semibold text-[#F1F9A1] font-heading flex items-center gap-1.5">
+                                        <Pencil className="w-3 h-3" />
+                                        Editar Dados Técnicos & Briefing
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={cancelEditingTech}
+                                        className="text-[#9BA6A0] hover:text-white transition-colors"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+
+                                    {/* Campo 1: Link para Briefing */}
+                                    <div>
+                                      <label className="block text-[11px] text-[#8EB69B] mb-1 font-medium flex items-center gap-1">
+                                        <FileText className="w-3 h-3 text-[#8EB69B]" />
+                                        Link para Briefing (Notion, Google Docs, Typeform...)
+                                      </label>
+                                      <input
+                                        type="url"
+                                        value={techBriefingUrl}
+                                        onChange={(e) => setTechBriefingUrl(e.target.value)}
+                                        placeholder="https://notion.so/... ou https://docs.google.com/..."
+                                        className="w-full px-3 py-1.5 rounded-lg bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] font-mono text-xs focus:outline-none focus:border-[#8EB69B]"
+                                      />
+                                    </div>
+
+                                    {/* Campo 2: Pasta de Arquivos */}
+                                    <div>
+                                      <label className="block text-[11px] text-[#58A6FF] mb-1 font-medium flex items-center gap-1">
+                                        <FolderOpen className="w-3 h-3 text-[#58A6FF]" />
+                                        Pasta de Arquivos (Google Drive / Imagens)
+                                      </label>
+                                      <input
+                                        type="url"
+                                        value={techDriveUrl}
+                                        onChange={(e) => setTechDriveUrl(e.target.value)}
+                                        placeholder="https://drive.google.com/drive/folders/..."
+                                        className="w-full px-3 py-1.5 rounded-lg bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] font-mono text-xs focus:outline-none focus:border-[#58A6FF]"
+                                      />
+                                    </div>
+
+                                    {/* Campo 3: Acessos do Cliente */}
+                                    <div>
+                                      <label className="block text-[11px] text-[#F1F9A1] mb-1 font-medium flex items-center gap-1">
+                                        <Key className="w-3 h-3 text-[#F1F9A1]" />
+                                        Acessos do Cliente (DNS, Login WordPress ou Hostinger)
+                                      </label>
+                                      <textarea
+                                        rows={4}
+                                        value={techAccessNotes}
+                                        onChange={(e) => setTechAccessNotes(e.target.value)}
+                                        placeholder="Exemplo:&#10;DNS / Cloudflare: user@cliente.com&#10;Hostinger: painel.hostinger.com | user | pass&#10;WordPress: wp-admin | admin | ••••••••"
+                                        className="w-full px-3 py-2 rounded-lg bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] font-mono text-xs focus:outline-none focus:border-[#F1F9A1] resize-none"
+                                      />
+                                    </div>
+
+                                    {/* Campo 4: Paleta e Fontes */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                      <div>
+                                        <label className="block text-[11px] text-[#8EB69B] mb-1 font-medium flex items-center gap-1">
+                                          <Palette className="w-3 h-3 text-[#8EB69B]" />
+                                          Paleta de Cores (Hexadecimais)
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={techColorPalette}
+                                          onChange={(e) => setTechColorPalette(e.target.value)}
+                                          placeholder="#07100F, #8EB69B, #F1F9A1"
+                                          className="w-full px-3 py-1.5 rounded-lg bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] font-mono text-xs focus:outline-none focus:border-[#8EB69B]"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[11px] text-[#8EB69B] mb-1 font-medium flex items-center gap-1">
+                                          <Type className="w-3 h-3 text-[#8EB69B]" />
+                                          Fontes do Projeto
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={techFonts}
+                                          onChange={(e) => setTechFonts(e.target.value)}
+                                          placeholder="Ex: Syne, Plus Jakarta Sans"
+                                          className="w-full px-3 py-1.5 rounded-lg bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] text-xs focus:outline-none focus:border-[#8EB69B]"
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <div className="flex justify-end gap-2 pt-2 border-t border-[rgba(218,241,222,0.06)]">
+                                      <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        className="h-7 text-xs px-2.5"
+                                        onClick={cancelEditingTech}
+                                      >
+                                        Cancelar
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="primary"
+                                        size="sm"
+                                        className="h-7 text-xs px-3"
+                                        onClick={() => handleSaveTechInline(proj.id)}
+                                      >
+                                        Salvar Dados
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  /* MODO VISUALIZAÇÃO INTERATIVA */
+                                  <div className="space-y-3 text-xs">
+                                    {/* 1. Link para Briefing */}
+                                    <div className="p-2.5 rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.06)] space-y-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[11px] font-medium text-[#8EB69B] flex items-center gap-1.5">
+                                          <FileText className="w-3.5 h-3.5 text-[#8EB69B]" />
+                                          Link para Briefing
+                                        </span>
+                                        {hasBriefing && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleCopyText(proj.briefing_url!, 'Link do Briefing')}
+                                            className="text-[10px] font-mono text-[#9BA6A0] hover:text-[#F1F9A1] flex items-center gap-1 transition-colors"
+                                          >
+                                            <Copy className="w-3 h-3" />
+                                            <span>Copiar link</span>
+                                          </button>
+                                        )}
+                                      </div>
+
+                                      {hasBriefing ? (
+                                        <a
+                                          href={formatExternalUrl(proj.briefing_url!)}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="px-3 py-1.5 rounded-lg bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.08)] hover:border-[#8EB69B]/40 text-[#E7ECE8] hover:text-[#F1F9A1] font-mono text-xs flex items-center justify-between gap-2 transition-all group/link"
+                                        >
+                                          <span className="truncate">{formatDisplayUrl(proj.briefing_url!)}</span>
+                                          <ExternalLink className="w-3.5 h-3.5 text-[#8EB69B] group-hover/link:text-[#F1F9A1] shrink-0" />
+                                        </a>
+                                      ) : (
+                                        <div className="flex items-center justify-between text-[11px] text-[#65706A] italic py-0.5">
+                                          <span>Nenhum briefing vinculado</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => startEditingTech(proj)}
+                                            className="text-[#8EB69B] hover:text-[#F1F9A1] not-italic font-sans font-medium"
+                                          >
+                                            + Adicionar
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* 2. Pasta de Arquivos (Google Drive / Imagens) */}
+                                    <div className="p-2.5 rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.06)] space-y-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[11px] font-medium text-[#58A6FF] flex items-center gap-1.5">
+                                          <FolderOpen className="w-3.5 h-3.5 text-[#58A6FF]" />
+                                          Pasta de Arquivos (Google Drive / Imagens)
+                                        </span>
+                                        {hasDrive && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleCopyText(proj.drive_folder_url!, 'Link do Drive')}
+                                            className="text-[10px] font-mono text-[#9BA6A0] hover:text-[#F1F9A1] flex items-center gap-1 transition-colors"
+                                          >
+                                            <Copy className="w-3 h-3" />
+                                            <span>Copiar link</span>
+                                          </button>
+                                        )}
+                                      </div>
+
+                                      {hasDrive ? (
+                                        <a
+                                          href={formatExternalUrl(proj.drive_folder_url!)}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="px-3 py-1.5 rounded-lg bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.08)] hover:border-[#58A6FF]/40 text-[#E7ECE8] hover:text-[#58A6FF] font-mono text-xs flex items-center justify-between gap-2 transition-all group/drive"
+                                        >
+                                          <span className="truncate">{formatDisplayUrl(proj.drive_folder_url!)}</span>
+                                          <ExternalLink className="w-3.5 h-3.5 text-[#58A6FF] shrink-0" />
+                                        </a>
+                                      ) : (
+                                        <div className="flex items-center justify-between text-[11px] text-[#65706A] italic py-0.5">
+                                          <span>Nenhuma pasta vinculada</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => startEditingTech(proj)}
+                                            className="text-[#58A6FF] hover:underline not-italic font-sans font-medium"
+                                          >
+                                            + Vincular Drive
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* 3. Acessos do Cliente (DNS, Login WordPress ou Hostinger) */}
+                                    <div className="p-2.5 rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.06)] space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[11px] font-medium text-[#F1F9A1] flex items-center gap-1.5">
+                                          <Key className="w-3.5 h-3.5 text-[#F1F9A1]" />
+                                          Acessos do Cliente (DNS, WordPress, Hostinger)
+                                        </span>
+                                        {hasAccess && (
+                                          <div className="flex items-center gap-2">
+                                            <button
+                                              type="button"
+                                              onClick={() => toggleRevealAccess(proj.id)}
+                                              className="text-[10px] font-mono text-[#9BA6A0] hover:text-[#E7ECE8] flex items-center gap-1 transition-colors"
+                                              title={isRevealed ? 'Ocultar senhas' : 'Ver senhas'}
+                                            >
+                                              {isRevealed ? (
+                                                <>
+                                                  <EyeOff className="w-3 h-3 text-[#F1F9A1]" />
+                                                  <span>Ocultar</span>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <Eye className="w-3 h-3" />
+                                                  <span>Revelar</span>
+                                                </>
+                                              )}
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleCopyText(proj.client_access_notes!, 'Acessos')}
+                                              className="text-[10px] font-mono text-[#9BA6A0] hover:text-[#F1F9A1] flex items-center gap-1 transition-colors"
+                                            >
+                                              <Copy className="w-3 h-3" />
+                                              <span>Copiar</span>
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {hasAccess ? (
+                                        <div className="p-2.5 rounded-lg bg-[#07100F] border border-[rgba(218,241,222,0.08)] font-mono text-[11px] text-[#E7ECE8] whitespace-pre-wrap leading-relaxed select-all">
+                                          {isRevealed ? proj.client_access_notes : maskCredentials(proj.client_access_notes)}
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center justify-between text-[11px] text-[#65706A] italic py-0.5">
+                                          <span>Nenhum acesso registrado</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => startEditingTech(proj)}
+                                            className="text-[#F1F9A1] hover:underline not-italic font-sans font-medium"
+                                          >
+                                            + Cadastrar Acessos
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    {/* 4. Paleta de Cores & Fontes do Projeto */}
+                                    <div className="p-2.5 rounded-xl bg-[#0C1A19] border border-[rgba(218,241,222,0.06)] space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[11px] font-medium text-[#8EB69B] flex items-center gap-1.5">
+                                          <Palette className="w-3.5 h-3.5 text-[#8EB69B]" />
+                                          Paleta de Cores & Fontes do Projeto
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => startEditingTech(proj)}
+                                          className="text-[10px] font-mono text-[#8EB69B] hover:text-[#F1F9A1] flex items-center gap-1 transition-colors"
+                                        >
+                                          <Pencil className="w-3 h-3" />
+                                          <span>Editar</span>
+                                        </button>
+                                      </div>
+
+                                      <div className="space-y-2">
+                                        {/* Swatches de Cores */}
+                                        {hasColors ? (
+                                          <div className="space-y-1.5">
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                              {hexColors.map((hex) => (
+                                                <button
+                                                  key={hex}
+                                                  type="button"
+                                                  onClick={() => handleCopyText(hex, `Cor ${hex}`)}
+                                                  className="px-2 py-1 rounded-md bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.12)] flex items-center gap-1.5 transition-all text-[11px] font-mono group/swatch"
+                                                  title={`Clique para copiar ${hex}`}
+                                                >
+                                                  <span
+                                                    className="w-3 h-3 rounded-full border border-black/40 shrink-0 shadow-sm"
+                                                    style={{ backgroundColor: hex }}
+                                                  />
+                                                  <span className="text-[#E7ECE8] group-hover/swatch:text-[#F1F9A1]">{hex}</span>
+                                                </button>
+                                              ))}
+                                            </div>
+                                            {hexColors.length === 0 && (
+                                              <div className="text-[11px] font-mono text-[#E7ECE8] bg-[#10201E] p-1.5 rounded-md border border-[rgba(218,241,222,0.06)]">
+                                                {proj.color_palette}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div className="text-[11px] text-[#65706A] italic">
+                                            Nenhuma paleta de cores configurada
+                                          </div>
+                                        )}
+
+                                        {/* Fontes / Tipografia */}
+                                        {hasFonts ? (
+                                          <div className="flex items-center gap-1.5 pt-1 border-t border-[rgba(218,241,222,0.04)]">
+                                            <Type className="w-3 h-3 text-[#9BA6A0] shrink-0" />
+                                            <span className="text-[11px] text-[#E7ECE8] font-medium">
+                                              {proj.typography_fonts}
+                                            </span>
+                                          </div>
+                                        ) : (
+                                          <div className="text-[11px] text-[#65706A] italic pt-1 border-t border-[rgba(218,241,222,0.04)]">
+                                            Nenhuma tipografia registrada
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* Botão de Rodapé para Edição Rápida */}
+                                    <div className="flex justify-end pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => startEditingTech(proj)}
+                                        className="px-2.5 py-1 rounded-lg bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8] text-[11px] font-medium flex items-center gap-1.5 transition-all"
+                                      >
+                                        <Pencil className="w-3 h-3 text-[#8EB69B]" />
+                                        <span>Editar Dados Técnicos</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     <div className="pt-3 border-t border-[rgba(218,241,222,0.06)] flex items-center justify-between text-xs text-[#9BA6A0]">
@@ -832,6 +1368,73 @@ export default function ProjetosPage() {
             </div>
           </div>
 
+          {/* Seção Dados Técnicos & Briefing no Modal */}
+          <div className="pt-3 border-t border-[rgba(218,241,222,0.08)] space-y-3">
+            <div className="text-xs font-semibold text-[#8EB69B] font-heading flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5" />
+              <span>Dados Técnicos & Briefing</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[#9BA6A0] mb-1 font-medium">Link para Briefing</label>
+                <input
+                  type="url"
+                  value={pBriefingUrl}
+                  onChange={(e) => setPBriefingUrl(e.target.value)}
+                  placeholder="https://notion.so/... ou Docs"
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] font-mono text-xs focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[#9BA6A0] mb-1 font-medium">Pasta de Arquivos (Google Drive)</label>
+                <input
+                  type="url"
+                  value={pDriveFolderUrl}
+                  onChange={(e) => setPDriveFolderUrl(e.target.value)}
+                  placeholder="https://drive.google.com/..."
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] font-mono text-xs focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">
+                Acessos do Cliente (DNS, Login WordPress ou Hostinger)
+              </label>
+              <textarea
+                rows={3}
+                value={pClientAccessNotes}
+                onChange={(e) => setPClientAccessNotes(e.target.value)}
+                placeholder="Ex:&#10;DNS: Registro.br&#10;WordPress: wp-admin | admin | ••••••••"
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] font-mono text-xs focus:outline-none resize-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[#9BA6A0] mb-1 font-medium">Paleta de Cores (Hexadecimais)</label>
+                <input
+                  type="text"
+                  value={pColorPalette}
+                  onChange={(e) => setPColorPalette(e.target.value)}
+                  placeholder="#07100F, #8EB69B, #F1F9A1"
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] font-mono text-xs focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[#9BA6A0] mb-1 font-medium">Fontes do Projeto</label>
+                <input
+                  type="text"
+                  value={pTypographyFonts}
+                  onChange={(e) => setPTypographyFonts(e.target.value)}
+                  placeholder="Ex: Syne, Plus Jakarta Sans"
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] text-xs focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="flex justify-end gap-2 pt-4 border-t border-[rgba(218,241,222,0.06)]">
             <Button
               variant="secondary"
@@ -889,6 +1492,20 @@ export default function ProjetosPage() {
           </div>
         </div>
       </Modal>
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl bg-[#0D1117] border border-[#8EB69B]/40 text-[#E7ECE8] shadow-2xl shadow-black/80 animate-in slide-in-from-bottom-3 duration-200">
+          <CheckCircle2 className="w-4 h-4 text-[#F1F9A1] shrink-0" />
+          <span className="text-xs font-medium">{toastMessage}</span>
+          <button
+            type="button"
+            onClick={() => setToastMessage(null)}
+            className="p-1 rounded-lg text-[#8B949E] hover:text-white transition-colors ml-1"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -167,6 +167,11 @@ CREATE TABLE IF NOT EXISTS projects (
     name TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'aguardando_inicio', -- 'aguardando_inicio', 'briefing', 'em_desenvolvimento', 'revisao', 'ajustes', 'aguardando_cliente', 'concluido', 'cancelado'
     website_url TEXT,
+    briefing_url TEXT,
+    drive_folder_url TEXT,
+    client_access_notes TEXT,
+    color_palette TEXT,
+    typography_fonts TEXT,
     start_date DATE,
     deadline DATE,
     completed_at TIMESTAMPTZ,

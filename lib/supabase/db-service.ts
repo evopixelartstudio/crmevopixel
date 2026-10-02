@@ -779,6 +779,11 @@ export class DatabaseService {
         'progress_percentage',
         'amount_contracted',
         'amount_received',
+        'briefing_url',
+        'drive_folder_url',
+        'client_access_notes',
+        'color_palette',
+        'typography_fonts',
       ]);
       if (dataToInsert.id && (dataToInsert.id.startsWith('proj-') || !isValidUUID(dataToInsert.id))) {
         delete dataToInsert.id;
@@ -808,6 +813,11 @@ export class DatabaseService {
         'progress_percentage',
         'amount_contracted',
         'amount_received',
+        'briefing_url',
+        'drive_folder_url',
+        'client_access_notes',
+        'color_palette',
+        'typography_fonts',
       ]);
       if (dataToUpdate.id && !isValidUUID(dataToUpdate.id)) {
         delete dataToUpdate.id;

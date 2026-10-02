@@ -226,6 +226,11 @@ export interface Project {
   amount_contracted?: number;
   amount_received?: number;
   notes?: string;
+  briefing_url?: string;
+  drive_folder_url?: string;
+  client_access_notes?: string;
+  color_palette?: string;
+  typography_fonts?: string;
 }
 
 export interface HistoricalProject {
