@@ -131,6 +131,8 @@ export interface Opportunity {
   loss_reason?: string | null;
   loss_notes?: string | null;
   closed_at?: string | null;
+  payment_link?: string | null;
+  delivery_days?: number | null;
   score: number;
   temperature: Temperature;
   priority: Priority;

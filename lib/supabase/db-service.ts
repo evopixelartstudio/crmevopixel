@@ -447,6 +447,8 @@ export class DatabaseService {
           loss_reason: row.loss_reason || null,
           loss_notes: row.loss_notes || null,
           closed_at: row.closed_at || null,
+          payment_link: row.payment_link || null,
+          delivery_days: row.delivery_days !== undefined && row.delivery_days !== null ? Number(row.delivery_days) : 7,
           stage_slug: matchedStage?.slug || row.stage_slug || 'primeiro_contato',
           lead_name: parsedLead?.name || row.lead_name || 'Contato Principal',
           company_name: parsedLead?.company_name || row.company_name || row.title || 'Cliente',
@@ -508,6 +510,13 @@ export class DatabaseService {
         probability: Number(opportunity.probability) || 0,
         status: opportunity.status || 'aberta',
       };
+
+      if (opportunity.payment_link !== undefined) {
+        payload.payment_link = opportunity.payment_link;
+      }
+      if (opportunity.delivery_days !== undefined) {
+        payload.delivery_days = opportunity.delivery_days;
+      }
 
       if (isValidUUID(opportunity.id)) {
         payload.id = opportunity.id;
@@ -576,6 +585,11 @@ export class DatabaseService {
       if (data.estimated_value !== undefined) payload.estimated_value = Number(data.estimated_value) || 0;
       if (data.probability !== undefined) payload.probability = Number(data.probability) || 0;
       if (data.status !== undefined) payload.status = data.status;
+      if (data.loss_reason !== undefined) payload.loss_reason = data.loss_reason;
+      if (data.loss_notes !== undefined) payload.loss_notes = data.loss_notes;
+      if (data.closed_at !== undefined) payload.closed_at = data.closed_at;
+      if (data.payment_link !== undefined) payload.payment_link = data.payment_link;
+      if (data.delivery_days !== undefined) payload.delivery_days = data.delivery_days;
 
       if (Object.keys(payload).length === 0) return true;
 

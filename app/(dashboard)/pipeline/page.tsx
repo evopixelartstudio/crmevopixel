@@ -32,6 +32,10 @@ import {
   Filter,
   X,
   CheckCircle2,
+  Copy,
+  Link2,
+  CreditCard,
+  Send,
 } from 'lucide-react';
 
 interface SupabaseOpportunityRow {
@@ -46,12 +50,83 @@ interface SupabaseOpportunityRow {
   loss_reason?: string | null;
   loss_notes?: string | null;
   closed_at?: string | null;
+  payment_link?: string | null;
+  delivery_days?: number | null;
   created_at?: string;
   updated_at?: string;
   leads?: Partial<Lead> | Partial<Lead>[] | null;
 }
 
 const LOST_STORAGE_KEY = 'evocrm_lost_metadata';
+const CLOSING_STORAGE_KEY = 'evocrm_closing_metadata';
+
+function getClosingMetadataMap(): Record<
+  string,
+  { payment_link?: string | null; delivery_days?: number | null }
+> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(CLOSING_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function getClosingMetadata(id: string) {
+  const map = getClosingMetadataMap();
+  return map[id] || null;
+}
+
+function saveClosingMetadata(
+  id: string,
+  data: { payment_link?: string | null; delivery_days?: number | null }
+) {
+  if (typeof window === 'undefined') return;
+  try {
+    const map = getClosingMetadataMap();
+    map[id] = { ...map[id], ...data };
+    localStorage.setItem(CLOSING_STORAGE_KEY, JSON.stringify(map));
+  } catch (e) {
+    console.error('Erro ao salvar metadados de fechamento:', e);
+  }
+}
+
+// Gerador padronizado da mensagem formatada para WhatsApp de fechamento de proposta
+function generateWhatsAppProposalMessage(
+  opp: Opportunity,
+  overrideLink?: string,
+  overrideDays?: number
+): string {
+  const contactName =
+    opp.leads?.name ||
+    opp.lead_name ||
+    opp.company_name ||
+    opp.title ||
+    'Cliente';
+
+  const serviceName =
+    (opp.services && opp.services.length > 0
+      ? opp.services.join(' + ')
+      : opp.title.replace(/^oportunidade\s*-\s*/i, '')) || 'Landing Page / Website';
+
+  const deliveryDays =
+    overrideDays !== undefined && overrideDays !== null
+      ? overrideDays
+      : (opp.delivery_days ?? 7);
+
+  const paymentLink =
+    (overrideLink !== undefined ? overrideLink : opp.payment_link)?.trim() ||
+    'https://mpago.la/exemplo-evopixel';
+
+  return `Fala, ${contactName}! Tudo bem?
+Conforme conversamos, o projeto de ${serviceName} está alinhado com prazo de entrega de ${deliveryDays} dias.
+
+Você pode realizar a entrada ou pagamento seguro por este link do Mercado Pago:
+${paymentLink}
+
+Assim que confirmar, já iniciamos o processo aqui na EvoPixel!`;
+}
 
 function getLostMetadataMap(): Record<
   string,
@@ -167,6 +242,22 @@ export default function PipelinePage() {
   const [editWhatsapp, setEditWhatsapp] = useState('');
   const [editInstagram, setEditInstagram] = useState('');
   const [editGoogleBusiness, setEditGoogleBusiness] = useState('');
+  const [editPaymentLink, setEditPaymentLink] = useState('');
+  const [editDeliveryDays, setEditDeliveryDays] = useState('7');
+
+  // Campos extras para Nova Oportunidade
+  const [newPaymentLink, setNewPaymentLink] = useState('');
+  const [newDeliveryDays, setNewDeliveryDays] = useState('7');
+
+  // Feedback Toast de Sucesso para Cópia
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3500);
+  }, []);
 
   // Modal com Design Dark Minimalista (#0D1117): Marcar como Perdido
   const [lostModalOpp, setLostModalOpp] = useState<Opportunity | null>(null);
@@ -230,6 +321,16 @@ export default function PipelinePage() {
       const lossNotesVal = row.loss_notes || localMeta?.loss_notes || null;
       const closedAt = row.closed_at || localMeta?.closed_at || null;
 
+      // Local metadata fallback para payment_link e delivery_days
+      const closingMeta = getClosingMetadata(row.id);
+      const paymentLink = row.payment_link || closingMeta?.payment_link || null;
+      const deliveryDays =
+        row.delivery_days !== undefined && row.delivery_days !== null
+          ? Number(row.delivery_days)
+          : closingMeta?.delivery_days !== undefined && closingMeta?.delivery_days !== null
+          ? Number(closingMeta.delivery_days)
+          : 7;
+
       return {
         id: row.id,
         lead_id: row.lead_id ?? (leadObj?.id || null),
@@ -242,6 +343,8 @@ export default function PipelinePage() {
         loss_reason: lossReason,
         loss_notes: lossNotesVal,
         closed_at: closedAt,
+        payment_link: paymentLink,
+        delivery_days: deliveryDays,
         stage_slug: stage?.slug || '',
         lead_name: leadName,
         company_name: companyName,
@@ -283,20 +386,27 @@ export default function PipelinePage() {
         throw new Error(`Erro ao buscar etapas (pipeline_stages): ${stagesRes.error.message}`);
       }
 
-      // Busca oportunidades com suporte a loss_reason, loss_notes e closed_at
+      // Busca oportunidades com suporte a loss_reason, loss_notes, closed_at, payment_link e delivery_days
       let oppsRes = await supabase
         .from('opportunities')
         .select(
-          'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, loss_reason, loss_notes, closed_at, leads(*)'
+          'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, loss_reason, loss_notes, closed_at, payment_link, delivery_days, leads(*)'
         );
 
       if (oppsRes.error) {
-        console.warn('Fallback ao consultar opportunities com menos colunas:', oppsRes.error.message);
+        console.warn('Fallback ao consultar opportunities com colunas base:', oppsRes.error.message);
         oppsRes = await supabase
           .from('opportunities')
           .select(
-            'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, leads(*)'
+            'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, loss_reason, loss_notes, closed_at, leads(*)'
           );
+        if (oppsRes.error) {
+          oppsRes = await supabase
+            .from('opportunities')
+            .select(
+              'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, leads(*)'
+            );
+        }
       }
 
       if (oppsRes.error) {
@@ -566,7 +676,7 @@ export default function PipelinePage() {
     setIsSavingNew(true);
     try {
       const supabase = getSupabase();
-      const payload = {
+      const payload: Record<string, any> = {
         lead_id: newLeadId ? newLeadId : null,
         stage_id: stageIdToUse,
         company_id: null,
@@ -575,21 +685,43 @@ export default function PipelinePage() {
         probability: Math.min(100, Math.max(0, Number(newProbability) || 0)),
         status: 'aberto',
       };
+      if (newPaymentLink.trim()) payload.payment_link = newPaymentLink.trim();
+      if (newDeliveryDays) payload.delivery_days = parseInt(newDeliveryDays, 10) || 7;
 
-      const { data, error } = await supabase
+      let insertRes = await supabase
         .from('opportunities')
         .insert([payload])
         .select(
-          'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, leads(*)'
+          'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, payment_link, delivery_days, leads(*)'
         )
         .single();
 
-      if (error) {
-        throw error;
+      if (insertRes.error) {
+        delete payload.payment_link;
+        delete payload.delivery_days;
+        insertRes = await supabase
+          .from('opportunities')
+          .insert([payload])
+          .select(
+            'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, leads(*)'
+          )
+          .single();
+      }
+
+      if (insertRes.error) {
+        throw insertRes.error;
+      }
+
+      const createdData = insertRes.data as SupabaseOpportunityRow;
+      if (newPaymentLink.trim() || newDeliveryDays) {
+        saveClosingMetadata(createdData.id, {
+          payment_link: newPaymentLink.trim() || null,
+          delivery_days: parseInt(newDeliveryDays, 10) || 7,
+        });
       }
 
       const stageMap = new Map<string, PipelineStage>(stages.map((s) => [s.id, s]));
-      const createdOpp = mapRowToOpportunity(data as SupabaseOpportunityRow, stageMap, leadsList);
+      const createdOpp = mapRowToOpportunity(createdData, stageMap, leadsList);
 
       const nextOpps = [createdOpp, ...opportunities];
       setOpportunities(nextOpps);
@@ -605,6 +737,8 @@ export default function PipelinePage() {
       setNewValue('');
       setNewProbability('50');
       setNewStatus('aberto');
+      setNewPaymentLink('');
+      setNewDeliveryDays('7');
       setIsNewOppModalOpen(false);
     } catch (err: any) {
       console.error('Erro ao inserir oportunidade no Supabase:', err);
@@ -628,6 +762,8 @@ export default function PipelinePage() {
     setEditWhatsapp(leadData?.whatsapp || leadData?.phone || '');
     setEditInstagram(leadData?.instagram || '');
     setEditGoogleBusiness(leadData?.google_business || '');
+    setEditPaymentLink(opp.payment_link || '');
+    setEditDeliveryDays(String(opp.delivery_days ?? 7));
   };
 
   // Salvar edição
@@ -653,30 +789,50 @@ export default function PipelinePage() {
         });
       }
 
-      const payload = {
+      const payload: Record<string, any> = {
         title: editTitle.trim(),
         lead_id: targetLeadId,
         stage_id: editStageId || editingOpp.stage_id,
         estimated_value: Number(editValue) || 0,
         probability: Math.min(100, Math.max(0, Number(editProbability) || 0)),
         status: editStatus || 'aberto',
+        payment_link: editPaymentLink.trim() || null,
+        delivery_days: parseInt(editDeliveryDays, 10) || 7,
       };
 
-      const { data, error } = await supabase
+      let updateRes = await supabase
         .from('opportunities')
         .update(payload)
         .eq('id', editingOpp.id)
         .select(
-          'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, leads(*)'
+          'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, payment_link, delivery_days, leads(*)'
         )
         .single();
 
-      if (error) {
-        throw error;
+      if (updateRes.error) {
+        delete payload.payment_link;
+        delete payload.delivery_days;
+        updateRes = await supabase
+          .from('opportunities')
+          .update(payload)
+          .eq('id', editingOpp.id)
+          .select(
+            'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, leads(*)'
+          )
+          .single();
       }
 
+      if (updateRes.error) {
+        throw updateRes.error;
+      }
+
+      saveClosingMetadata(editingOpp.id, {
+        payment_link: editPaymentLink.trim() || null,
+        delivery_days: parseInt(editDeliveryDays, 10) || 7,
+      });
+
       const stageMap = new Map<string, PipelineStage>(stages.map((s) => [s.id, s]));
-      const updatedOpp = mapRowToOpportunity(data as SupabaseOpportunityRow, stageMap, leadsList);
+      const updatedOpp = mapRowToOpportunity(updateRes.data as SupabaseOpportunityRow, stageMap, leadsList);
 
       const nextOpps = opportunities.map((o) => (o.id === editingOpp.id ? updatedOpp : o));
       setOpportunities(nextOpps);
@@ -696,6 +852,56 @@ export default function PipelinePage() {
     } finally {
       setIsSavingEdit(false);
     }
+  };
+
+  // Ação de Cópia Inteligente da Proposta Comercial com link Mercado Pago
+  const handleCopyProposal = async (
+    opp: Opportunity,
+    e?: React.MouseEvent,
+    overrideLink?: string,
+    overrideDays?: number
+  ) => {
+    if (e) e.stopPropagation();
+    const message = generateWhatsAppProposalMessage(opp, overrideLink, overrideDays);
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(message);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = message;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      showToast('Mensagem copiada para a área de transferência!');
+    } catch (err) {
+      console.error('Falha ao copiar proposta:', err);
+      showToast('Mensagem copiada para a área de transferência!');
+    }
+  };
+
+  // Abrir chat do WhatsApp com a proposta pré-formatada
+  const handleOpenWhatsAppProposal = (
+    opp: Opportunity,
+    e?: React.MouseEvent,
+    overrideLink?: string,
+    overrideDays?: number
+  ) => {
+    if (e) e.stopPropagation();
+    const phone = opp.leads?.whatsapp || opp.leads?.phone;
+    if (!phone || !cleanPhoneNumber(phone)) {
+      if (
+        confirm(
+          `A oportunidade "${opp.title}" ainda não possui WhatsApp cadastrado. Deseja cadastrar agora no modal?`
+        )
+      ) {
+        handleOpenEditModal(opp);
+      }
+      return;
+    }
+    const message = generateWhatsAppProposalMessage(opp, overrideLink, overrideDays);
+    openWhatsApp(phone, message);
   };
 
   // Excluir oportunidade
@@ -1159,6 +1365,55 @@ export default function PipelinePage() {
                                     </button>
                                   </div>
 
+                                  {/* Fechamento de Proposta & Link Mercado Pago */}
+                                  <div className="mt-2.5 pt-2 border-t border-[rgba(218,241,222,0.06)] space-y-1.5">
+                                    <div className="flex items-center justify-between text-[10px]">
+                                      <span className="text-[#8EB69B] flex items-center gap-1 font-medium">
+                                        <CreditCard className="w-3 h-3 text-[#F1F9A1]" />
+                                        Mercado Pago:
+                                      </span>
+                                      {opp.payment_link ? (
+                                        <span
+                                          className="font-mono text-[#F1F9A1] bg-[#07100F] px-1.5 py-0.5 rounded border border-[rgba(218,241,222,0.12)] truncate max-w-[125px]"
+                                          title={opp.payment_link}
+                                        >
+                                          {opp.payment_link.replace(/^https?:\/\//, '')}
+                                        </span>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => handleOpenEditModal(opp, e)}
+                                          className="text-[#8EB69B] hover:text-[#F1F9A1] hover:underline flex items-center gap-0.5 transition-colors"
+                                        >
+                                          <Plus className="w-2.5 h-2.5" /> Inserir Link
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {/* Botões Rápidos: Copiar Proposta e Enviar no WhatsApp */}
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleCopyProposal(opp, e)}
+                                        className="py-1.5 px-2 rounded-lg bg-[#07100F] hover:bg-[#163832] border border-[rgba(218,241,222,0.1)] hover:border-[#8EB69B]/40 text-[#8EB69B] hover:text-[#E7ECE8] text-[10px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 group/btn"
+                                        title="Copiar texto da proposta formatado com link de pagamento"
+                                      >
+                                        <Copy className="w-3 h-3 text-[#8EB69B] group-hover/btn:text-[#F1F9A1] shrink-0" />
+                                        <span className="truncate">Copiar Proposta</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleOpenWhatsAppProposal(opp, e)}
+                                        className="py-1.5 px-2 rounded-lg bg-[#163832]/80 hover:bg-[#163832] border border-[#8EB69B]/40 hover:border-[#8EB69B] text-[#E7ECE8] text-[10px] font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 group/wa"
+                                        title="Abrir WhatsApp direto do lead com a proposta e link pré-preenchidos"
+                                      >
+                                        <WhatsAppIcon className="w-3 h-3 fill-[#8EB69B] group-hover/wa:fill-[#F1F9A1] shrink-0" />
+                                        <span className="truncate">Enviar WhatsApp</span>
+                                      </button>
+                                    </div>
+                                  </div>
+
                                   {/* BOTÃO EXPLÍCITO DENTRO DE CADA CARD DO KANBAN: "Marcar como Perdido" */}
                                   <button
                                     type="button"
@@ -1246,6 +1501,123 @@ export default function PipelinePage() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* MODO LISTA: Oportunidades Ativas com Proposta Mercado Pago & WhatsApp */}
+          {viewMode === 'lista' && (
+            <div className="bg-[#0C1A19]/80 border border-[rgba(218,241,222,0.08)] rounded-2xl overflow-hidden shadow-sm">
+              {activeOpportunities.length === 0 ? (
+                <div className="p-14 text-center space-y-2">
+                  <Kanban className="w-8 h-8 text-[#65706A] mx-auto opacity-70" />
+                  <p className="text-xs text-[#E7ECE8] font-medium">
+                    Nenhuma oportunidade ativa encontrada.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-[rgba(218,241,222,0.08)] bg-[#07100F] text-[11px] font-mono text-[#9BA6A0] uppercase tracking-wider">
+                        <th className="py-3.5 px-4">Oportunidade / Lead</th>
+                        <th className="py-3.5 px-4">Etapa</th>
+                        <th className="py-3.5 px-4">Valor Estimado</th>
+                        <th className="py-3.5 px-4">Link de Pagamento (Mercado Pago)</th>
+                        <th className="py-3.5 px-4 text-center">Proposta WhatsApp</th>
+                        <th className="py-3.5 px-4 text-right">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[rgba(218,241,222,0.06)] text-[#E7ECE8]">
+                      {activeOpportunities.map((opp) => {
+                        const stage = stages.find((s) => s.id === opp.stage_id);
+                        const leadData = opp.leads;
+
+                        return (
+                          <tr key={opp.id} className="hover:bg-[#10201E]/70 transition-colors">
+                            <td className="py-3.5 px-4">
+                              <div className="font-semibold text-[#E7ECE8] font-heading text-sm">
+                                {opp.title}
+                              </div>
+                              <div className="text-[11px] text-[#8EB69B] mt-0.5 flex items-center gap-1">
+                                <Building2 className="w-3 h-3 text-[#58A6FF]" />
+                                <span>{leadData?.company_name || leadData?.name || opp.company_name}</span>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <span
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-[#10201E] border border-[rgba(218,241,222,0.12)] text-[#E7ECE8]"
+                                style={{ borderLeftWidth: '3px', borderLeftColor: stage?.color || '#8EB69B' }}
+                              >
+                                {stage?.name || 'Etapa'}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 font-mono font-semibold text-[#F1F9A1]">
+                              R$ {(Number(opp.estimated_value) || 0).toLocaleString('pt-BR')}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              {opp.payment_link ? (
+                                <span className="font-mono text-[11px] text-[#F1F9A1] bg-[#07100F] px-2 py-1 rounded-lg border border-[rgba(218,241,222,0.1)] inline-block max-w-[200px] truncate" title={opp.payment_link}>
+                                  {opp.payment_link}
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleOpenEditModal(opp, e)}
+                                  className="text-[11px] text-[#58A6FF] hover:underline flex items-center gap-1"
+                                >
+                                  <Plus className="w-3 h-3" /> Adicionar Link
+                                </button>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleCopyProposal(opp, e)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-[#07100F] hover:bg-[#163832] border border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#E7ECE8] text-[11px] font-medium flex items-center gap-1 transition-all"
+                                  title="Copiar Proposta"
+                                >
+                                  <Copy className="w-3 h-3 text-[#8EB69B]" />
+                                  <span>Copiar</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleOpenWhatsAppProposal(opp, e)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-[#163832] hover:bg-[#1f4a42] border border-[#8EB69B]/40 text-[#E7ECE8] text-[11px] font-medium flex items-center gap-1 transition-all"
+                                  title="Abrir WhatsApp com Proposta"
+                                >
+                                  <WhatsAppIcon className="w-3 h-3 fill-[#8EB69B]" />
+                                  <span>WhatsApp</span>
+                                </button>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleOpenEditModal(opp, e)}
+                                  className="p-1.5 rounded-lg hover:bg-[#10201E] text-[#9BA6A0] hover:text-[#F1F9A1] transition-colors"
+                                  title="Editar"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleOpenLostModal(opp, e)}
+                                  className="p-1.5 rounded-lg hover:bg-red-500/10 text-[#8B949E] hover:text-red-400 transition-colors"
+                                  title="Marcar como Perdido"
+                                >
+                                  <UserX className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </>
@@ -1620,6 +1992,34 @@ export default function PipelinePage() {
             </div>
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2">
+              <label className="block text-[#9BA6A0] mb-1 font-medium">
+                Link de Pagamento (Mercado Pago) - Opcional
+              </label>
+              <input
+                type="url"
+                placeholder="https://mpago.la/..."
+                value={newPaymentLink}
+                onChange={(e) => setNewPaymentLink(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[#9BA6A0] mb-1 font-medium">
+                Prazo Entrega (Dias)
+              </label>
+              <input
+                type="number"
+                min={1}
+                value={newDeliveryDays}
+                onChange={(e) => setNewDeliveryDays(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+              />
+            </div>
+          </div>
+
           <div className="flex justify-end gap-2 pt-3 border-t border-[rgba(218,241,222,0.06)]">
             <Button
               type="button"
@@ -1787,6 +2187,100 @@ export default function PipelinePage() {
             </div>
           )}
 
+          {/* Seção de Fechamento de Proposta & Link Mercado Pago */}
+          <div className="pt-3 border-t border-[rgba(218,241,222,0.08)] space-y-3">
+            <div className="flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-[#F1F9A1]" />
+              <span className="text-xs font-semibold text-[#E7ECE8] font-heading">
+                Fechamento & Proposta via WhatsApp (Mercado Pago)
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
+                <label className="block text-[#9BA6A0] mb-1 font-medium">
+                  Link de Pagamento (Mercado Pago)
+                </label>
+                <div className="relative">
+                  <Link2 className="w-3.5 h-3.5 text-[#8B949E] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="url"
+                    placeholder="https://mpago.la/... ou link do checkout"
+                    value={editPaymentLink}
+                    onChange={(e) => setEditPaymentLink(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[#9BA6A0] mb-1 font-medium">
+                  Prazo de Entrega (Dias)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={editDeliveryDays}
+                  onChange={(e) => setEditDeliveryDays(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+                />
+              </div>
+            </div>
+
+            {/* Ações e Preview da Mensagem WhatsApp */}
+            <div className="rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.08)] p-3 space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-[10px] font-mono text-[#8B949E] uppercase tracking-wider">
+                  Preview da Mensagem (WhatsApp)
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) =>
+                      editingOpp &&
+                      handleCopyProposal(
+                        editingOpp,
+                        e,
+                        editPaymentLink,
+                        parseInt(editDeliveryDays, 10) || 7
+                      )
+                    }
+                    className="px-2.5 py-1 rounded-lg bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.12)] text-[#8EB69B] hover:text-[#F1F9A1] text-[11px] font-medium flex items-center gap-1.5 transition-all shadow-sm"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Copiar Proposta / Link de Pagamento</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) =>
+                      editingOpp &&
+                      handleOpenWhatsAppProposal(
+                        editingOpp,
+                        e,
+                        editPaymentLink,
+                        parseInt(editDeliveryDays, 10) || 7
+                      )
+                    }
+                    className="px-2.5 py-1 rounded-lg bg-[#163832] hover:bg-[#1f4a42] border border-[#8EB69B]/40 text-[#E7ECE8] text-[11px] font-medium flex items-center gap-1.5 transition-all shadow-sm"
+                  >
+                    <WhatsAppIcon className="w-3 h-3 fill-[#8EB69B]" />
+                    <span>Abrir no WhatsApp</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="text-[11px] text-[#9BA6A0] font-mono whitespace-pre-line leading-relaxed p-2.5 rounded-lg bg-[#0C1A19]/90 border border-[rgba(218,241,222,0.04)]">
+                {editingOpp &&
+                  generateWhatsAppProposalMessage(
+                    editingOpp,
+                    editPaymentLink,
+                    parseInt(editDeliveryDays, 10) || 7
+                  )}
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between pt-3 border-t border-[rgba(218,241,222,0.06)]">
             {editingOpp && (
               <button
@@ -1814,6 +2308,21 @@ export default function PipelinePage() {
           </div>
         </form>
       </Modal>
+
+      {/* Notificação Toast Flutuante de Sucesso */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl bg-[#0D1117] border border-[#8EB69B]/40 text-[#E7ECE8] shadow-2xl shadow-black/80 animate-in slide-in-from-bottom-3 duration-200">
+          <CheckCircle2 className="w-4 h-4 text-[#F1F9A1] shrink-0" />
+          <span className="text-xs font-medium">{toastMessage}</span>
+          <button
+            type="button"
+            onClick={() => setToastMessage(null)}
+            className="p-1 rounded-lg text-[#8B949E] hover:text-white transition-colors ml-1"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
