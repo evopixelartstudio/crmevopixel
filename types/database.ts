@@ -127,8 +127,9 @@ export interface Opportunity {
   title: string;
   estimated_value: number;
   probability: number;
-  status?: string;
+  status?: 'aberto' | 'ganho' | 'perdido' | string;
   loss_reason?: string | null;
+  loss_notes?: string | null;
   closed_at?: string | null;
   score: number;
   temperature: Temperature;
