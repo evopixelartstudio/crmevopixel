@@ -24,7 +24,6 @@ import {
   CreditCard,
   Receipt,
   Percent,
-  X,
 } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -207,7 +206,6 @@ export default function FinanceiroPage() {
   const [selectedYear, setSelectedYear] = useState<string>('todos');
   const [selectedMonth, setSelectedMonth] = useState<number | 'todos'>('todos');
   const [filterStatus, setFilterStatus] = useState<string>('todos');
-  const [isCalendarFilterOpen, setIsCalendarFilterOpen] = useState(false);
 
   // Modal State - Receita / Lançamento
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -765,143 +763,6 @@ export default function FinanceiroPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Botão de Filtro por Calendário (Popover) */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setIsCalendarFilterOpen(!isCalendarFilterOpen)}
-              className={`p-2 rounded-xl border transition-all relative flex items-center justify-center ${
-                selectedMonth !== 'todos' || selectedYear !== 'todos'
-                  ? 'bg-[#10201E] text-[#F1F9A1] border-[rgba(241,249,161,0.35)] shadow-sm'
-                  : 'bg-[#0C1A19] text-[#8EB69B] border-[rgba(218,241,222,0.1)] hover:bg-[#10201E] hover:text-[#E7ECE8]'
-              }`}
-              title={`Filtrar por período (${activePeriodLabel})`}
-            >
-              <Calendar className="w-4 h-4" />
-              {(selectedMonth !== 'todos' || selectedYear !== 'todos') && (
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#F1F9A1] border-2 border-[#07100F]" />
-              )}
-            </button>
-
-            {/* Popover / Pequeno Calendário */}
-            {isCalendarFilterOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setIsCalendarFilterOpen(false)}
-                />
-                <div className="absolute right-0 top-full mt-2 w-72 sm:w-80 rounded-2xl bg-[#0C1A19] border border-[rgba(218,241,222,0.15)] shadow-2xl p-4 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-3">
-                  {/* Cabeçalho do Mini Calendário */}
-                  <div className="flex items-center justify-between border-b border-[rgba(218,241,222,0.06)] pb-2.5">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="w-4 h-4 text-[#8EB69B]" />
-                      <span className="text-xs font-heading font-semibold text-[#E7ECE8]">
-                        Filtrar por Período
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsCalendarFilterOpen(false)}
-                      className="p-1 rounded-lg text-[#9BA6A0] hover:text-[#E7ECE8] hover:bg-[#10201E]"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  {/* Seletor de Ano */}
-                  <div>
-                    <label className="text-[10px] font-mono uppercase tracking-wider text-[#9BA6A0] block mb-1">
-                      Ano
-                    </label>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedYear('todos')}
-                        className={`py-1.5 px-2 rounded-lg text-xs font-mono transition-all text-center ${
-                          selectedYear === 'todos'
-                            ? 'bg-[#8EB69B] text-[#07100F] font-semibold'
-                            : 'bg-[#10201E] text-[#9BA6A0] hover:text-[#E7ECE8]'
-                        }`}
-                      >
-                        Todos
-                      </button>
-                      {availableYears.map((yr) => (
-                        <button
-                          key={yr}
-                          type="button"
-                          onClick={() => setSelectedYear(yr)}
-                          className={`py-1.5 px-2 rounded-lg text-xs font-mono transition-all text-center ${
-                            selectedYear === yr
-                              ? 'bg-[#8EB69B] text-[#07100F] font-semibold'
-                              : 'bg-[#10201E] text-[#9BA6A0] hover:text-[#E7ECE8]'
-                          }`}
-                        >
-                          {yr}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Grade de 12 Meses (Estilo Calendário) */}
-                  <div>
-                    <label className="text-[10px] font-mono uppercase tracking-wider text-[#9BA6A0] block mb-1">
-                      Mês
-                    </label>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {MONTH_NAMES.map((m) => (
-                        <button
-                          key={m.index}
-                          type="button"
-                          onClick={() => {
-                            setSelectedMonth(m.index);
-                            if (selectedYear === 'todos') {
-                              setSelectedYear(currentYearStr);
-                            }
-                          }}
-                          className={`py-2 px-1.5 rounded-lg text-xs font-mono transition-all text-center ${
-                            selectedMonth === m.index
-                              ? 'bg-[#8EB69B] text-[#07100F] font-semibold shadow-sm'
-                              : 'bg-[#10201E] text-[#9BA6A0] hover:text-[#E7ECE8] hover:bg-[#163832]'
-                          }`}
-                        >
-                          {m.short}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Ações Rápidas do Mini Calendário */}
-                  <div className="pt-2 border-t border-[rgba(218,241,222,0.06)] flex items-center justify-between text-xs font-mono">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const now = new Date();
-                        setSelectedYear(String(now.getFullYear()));
-                        setSelectedMonth(now.getMonth());
-                        setIsCalendarFilterOpen(false);
-                      }}
-                      className="text-[#8EB69B] hover:text-[#F1F9A1] hover:underline"
-                    >
-                      Mês Atual
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedYear('todos');
-                        setSelectedMonth('todos');
-                        setIsCalendarFilterOpen(false);
-                      }}
-                      className="text-[#9BA6A0] hover:text-[#E7ECE8]"
-                    >
-                      Limpar Filtro
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-
           <Link href="/minha-historia">
             <Button variant="secondary" size="sm">
               <span>Meu Histórico</span>
@@ -923,6 +784,72 @@ export default function FinanceiroPage() {
         </div>
       </div>
 
+      {/* Barra de Filtro por Mês e Ano */}
+      <div className="p-4 rounded-2xl bg-[#0C1A19] border border-[rgba(218,241,222,0.08)] flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 text-xs font-mono text-[#8EB69B] mr-1">
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Período:</span>
+          </div>
+
+          {/* Seletor de Ano */}
+          <select
+            value={selectedYear}
+            onChange={(e) => setSelectedYear(e.target.value)}
+            className="px-2.5 py-1.5 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.1)] text-xs font-mono text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
+          >
+            <option value="todos">Todos os Anos</option>
+            {availableYears.map((yr) => (
+              <option key={yr} value={yr}>
+                Ano {yr}
+              </option>
+            ))}
+          </select>
+
+          {/* Pílulas de Meses */}
+          <div className="flex items-center gap-1 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setSelectedMonth('todos')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-all ${
+                selectedMonth === 'todos'
+                  ? 'bg-[#8EB69B] text-[#07100F] font-semibold'
+                  : 'bg-[#10201E] text-[#9BA6A0] hover:text-[#E7ECE8]'
+              }`}
+            >
+              Todos os Meses
+            </button>
+            {MONTH_NAMES.map((m) => (
+              <button
+                key={m.index}
+                type="button"
+                onClick={() => setSelectedMonth(m.index)}
+                className={`px-2 py-1 rounded-lg text-xs font-mono transition-all ${
+                  selectedMonth === m.index
+                    ? 'bg-[#8EB69B] text-[#07100F] font-semibold'
+                    : 'bg-[#10201E] text-[#9BA6A0] hover:text-[#E7ECE8]'
+                }`}
+              >
+                {m.short}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {(selectedMonth !== 'todos' || selectedYear !== 'todos') && (
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedMonth('todos');
+              setSelectedYear('todos');
+            }}
+            className="text-xs font-mono text-[#8EB69B] hover:underline self-start lg:self-auto"
+          >
+            Limpar filtro de período
+          </button>
+        )}
+      </div>
+
       {/* Grid Principal de 4 Métricas: Entradas Recebidas, Saídas, Saldo Líquido e Pendente */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         {/* Entradas Recebidas */}
@@ -931,6 +858,9 @@ export default function FinanceiroPage() {
             <span className="text-xs font-mono uppercase tracking-wider text-[#8EB69B] flex items-center gap-1">
               <ArrowUpRight className="w-3.5 h-3.5" />
               Entradas (Recebido)
+            </span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#8EB69B]/10 text-[#8EB69B] font-mono">
+              + Receita
             </span>
           </div>
           <div className="text-2xl lg:text-3xl font-semibold font-heading text-[#8EB69B] mt-2 tracking-tight">
@@ -948,6 +878,9 @@ export default function FinanceiroPage() {
               <ArrowDownRight className="w-3.5 h-3.5" />
               Saídas (Gastos)
             </span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 font-mono">
+              - Despesas
+            </span>
           </div>
           <div className="text-2xl lg:text-3xl font-semibold font-heading text-red-400 mt-2 tracking-tight">
             - R$ {kpiMetrics.gastosMensais.toLocaleString('pt-BR')}
@@ -962,6 +895,15 @@ export default function FinanceiroPage() {
           <div className="flex items-center justify-between">
             <span className="text-xs font-mono uppercase tracking-wider text-[#E7ECE8]">
               Saldo Líquido (Lucro)
+            </span>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                kpiMetrics.saldoLiquido >= 0
+                  ? 'bg-[#8EB69B]/10 text-[#8EB69B]'
+                  : 'bg-red-500/10 text-red-400'
+              }`}
+            >
+              Entradas - Saídas
             </span>
           </div>
           <div
@@ -981,6 +923,9 @@ export default function FinanceiroPage() {
           <div className="flex items-center justify-between">
             <span className="text-xs font-mono uppercase tracking-wider text-[#F1F9A1]">
               Valor Pendente
+            </span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#F1F9A1]/10 text-[#F1F9A1] font-mono">
+              A Receber
             </span>
           </div>
           <div className="text-2xl lg:text-3xl font-semibold font-heading text-[#F1F9A1] mt-2 tracking-tight">
