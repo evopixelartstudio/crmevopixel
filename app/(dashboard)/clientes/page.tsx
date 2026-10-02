@@ -11,18 +11,18 @@ import {
   Plus,
   Pencil,
   Trash2,
-  Eye,
-  MessageSquare,
   ArrowUpRight,
   Mail,
   Globe,
   ExternalLink,
+  Instagram,
+  MapPin,
 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 import { openWhatsApp, cleanPhoneNumber } from '@/lib/utils/whatsapp';
+import { openInstagramProfile, openGoogleMapsProfile } from '@/lib/utils/social-links';
 import { formatPhoneNumber } from '@/lib/utils';
-import { GenerateMessageModal, TargetEntity } from '@/components/modals/GenerateMessageModal';
 
 function formatExternalUrl(url: string): string {
   const trimmed = url.trim();
@@ -38,6 +38,7 @@ function formatDisplayUrl(url: string): string {
 export default function ClientesPage() {
   useCrmSync();
   const clients = crmService.getClients();
+  const leads = crmService.getLeads();
   const [searchTerm, setSearchTerm] = useState('');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -47,10 +48,19 @@ export default function ClientesPage() {
   const [cEmail, setCEmail] = useState('');
   const [cPhone, setCPhone] = useState('');
   const [cWebsite, setCWebsite] = useState('');
+  const [cInstagram, setCInstagram] = useState('');
+  const [cGoogleBusiness, setCGoogleBusiness] = useState('');
   const [editId, setEditId] = useState<string | null>(null);
 
-  // Modal de Geração de Mensagem para WhatsApp
-  const [messageTarget, setMessageTarget] = useState<TargetEntity | null>(null);
+  const findLinkedLead = (companyName?: string, clientName?: string) => {
+    const normComp = (companyName || '').trim().toLowerCase();
+    const normName = (clientName || '').trim().toLowerCase();
+    return leads.find(
+      (l) =>
+        (normComp && (l.company_name || '').trim().toLowerCase() === normComp) ||
+        (normName && (l.name || '').trim().toLowerCase() === normName)
+    );
+  };
 
   const handleAddClient = () => {
     if (!cCompany || !cName) {
@@ -72,6 +82,8 @@ export default function ClientesPage() {
       phone: cPhone,
       email: cEmail,
       website_url: cWebsite.trim() || undefined,
+      instagram: cInstagram.trim() || undefined,
+      google_business: cGoogleBusiness.trim() || undefined,
     };
 
     if (editId) {
@@ -93,13 +105,16 @@ export default function ClientesPage() {
 
   const handleEdit = (client: any) => {
     const websites = crmService.getClientWebsites(client.company_name, client.website_url);
+    const linkedLead = findLinkedLead(client.company_name, client.name);
     setEditId(client.id);
     setCName(client.name);
     setCCompany(client.company_name);
     setCSegment(client.segment);
-    setCEmail(client.email || '');
-    setCPhone(client.phone || '');
+    setCEmail(client.email || linkedLead?.email || '');
+    setCPhone(client.phone || linkedLead?.whatsapp || linkedLead?.phone || '');
     setCWebsite(client.website_url || websites[0] || '');
+    setCInstagram(client.instagram || linkedLead?.instagram || '');
+    setCGoogleBusiness(client.google_business || linkedLead?.google_business || '');
     setIsModalOpen(true);
   };
 
@@ -118,6 +133,8 @@ export default function ClientesPage() {
     setCEmail('');
     setCPhone('');
     setCWebsite('');
+    setCInstagram('');
+    setCGoogleBusiness('');
   };
 
   const handleDirectWhatsApp = (phone?: string, companyName?: string, clientObj?: any) => {
@@ -134,22 +151,31 @@ export default function ClientesPage() {
     openWhatsApp(phone);
   };
 
-  const handleOpenMessageModal = (client: any) => {
-    setMessageTarget({
-      id: client.id,
-      name: client.name,
-      company_name: client.company_name,
-      phone: client.phone,
-      whatsapp: client.phone,
-      segment: client.segment,
+  const handleDirectInstagram = (instagram?: string, companyName?: string, clientObj?: any) => {
+    openInstagramProfile(instagram, companyName, () => {
+      if (
+        confirm(
+          `O cliente "${companyName}" ainda não possui Instagram cadastrado. Deseja cadastrar agora?`
+        )
+      ) {
+        handleEdit(clientObj);
+      }
     });
+  };
+
+  const handleDirectMaps = (
+    googleBusiness?: string,
+    companyName?: string,
+    city?: string
+  ) => {
+    openGoogleMapsProfile(googleBusiness, companyName, city);
   };
 
   const filteredClients = clients.filter(
     (c) =>
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.company_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.segment.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.company_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.segment || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.phone && c.phone.includes(searchTerm)) ||
       (c.email && c.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (c.website_url && c.website_url.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -162,13 +188,13 @@ export default function ClientesPage() {
         <div>
           <div className="flex items-center gap-2 text-xs font-mono text-[#8EB69B] uppercase tracking-wider mb-1">
             <Building2 className="w-3.5 h-3.5 text-[#F1F9A1]" />
-            Gestão de Carteira & Clientes
+            Gestão de Carteira &amp; Clientes
           </div>
           <h1 className="text-2xl lg:text-3xl font-semibold text-[#E7ECE8] font-heading">
             Clientes da EvoPixel
           </h1>
           <p className="text-xs text-[#9BA6A0] mt-1">
-            Lista consolidada de clientes, sites entregues, Lifetime Value, contato direto via WhatsApp e perfil.
+            Lista consolidada de clientes, sites entregues, Lifetime Value, contato direto via WhatsApp, Instagram e Google Meu Negócio.
           </p>
         </div>
 
@@ -215,128 +241,161 @@ export default function ClientesPage() {
               {filteredClients.map((client) => {
                 const websites = crmService.getClientWebsites(client.company_name, client.website_url);
                 const primaryWebsite = websites[0];
+                const linkedLead = findLinkedLead(client.company_name, client.name);
+                const clientPhone = client.phone || client.whatsapp || linkedLead?.whatsapp || linkedLead?.phone;
+                const clientInstagram = client.instagram || linkedLead?.instagram;
+                const clientGoogleBusiness = client.google_business || linkedLead?.google_business;
 
                 return (
-                <tr
-                  key={client.id}
-                  className="hover:bg-[#10201E]/40 transition-colors group"
-                >
-                  {/* Empresa e Contato */}
-                  <td className="py-3.5 px-4">
-                    <Link
-                      href={`/clientes/${client.id}`}
-                      className="font-medium text-[#E7ECE8] group-hover:text-[#F1F9A1] transition-colors flex items-center gap-1.5"
-                    >
-                      <span>{client.company_name}</span>
-                      <ArrowUpRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </Link>
-                    <div className="text-[11px] text-[#9BA6A0] mt-0.5 flex items-center gap-2 flex-wrap">
-                      <span>{client.name}</span>
-                      {client.email && (
-                        <>
-                          <span>•</span>
-                          <span className="flex items-center gap-1 text-[#65706A]">
-                            <Mail className="w-3 h-3" />
-                            {client.email}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* Segmento */}
-                  <td className="py-3.5 px-4">
-                    <span className="text-[11px] font-mono text-[#8EB69B] px-2 py-0.5 rounded bg-[#10201E] border border-[rgba(218,241,222,0.06)]">
-                      {client.segment}
-                    </span>
-                  </td>
-
-                  {/* Site / Link */}
-                  <td className="py-3.5 px-4">
-                    {primaryWebsite ? (
-                      <div className="flex flex-col gap-1 items-start">
-                        {websites.map((url, idx) => (
-                          <a
-                            key={idx}
-                            href={formatExternalUrl(url)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.1)] text-[#F1F9A1] font-mono text-[11px] transition-colors"
-                            title={url}
-                          >
-                            <Globe className="w-3 h-3 text-[#8EB69B] shrink-0" />
-                            <span className="max-w-[150px] truncate">{formatDisplayUrl(url)}</span>
-                            <ExternalLink className="w-2.5 h-2.5 shrink-0" />
-                          </a>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-[#65706A] italic text-[11px]">Sem site vinculado</span>
-                    )}
-                  </td>
-
-                  {/* Telefone / WhatsApp */}
-                  <td className="py-3.5 px-4 font-mono text-xs">
-                    {client.phone ? (
-                      <span className="text-[#8EB69B]">{client.phone}</span>
-                    ) : (
-                      <span className="text-[#65706A] italic">Não informado</span>
-                    )}
-                  </td>
-
-                  {/* LTV */}
-                  <td className="py-3.5 px-4 text-right font-mono font-semibold text-[#F1F9A1]">
-                    R$ {client.lifetime_value.toLocaleString('pt-BR')}
-                  </td>
-
-                  {/* Ações */}
-                  <td className="py-3.5 px-4 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      {/* Botão WhatsApp Direto (Só a logo) */}
-                      <button
-                        onClick={() => handleDirectWhatsApp(client.phone, client.company_name, client)}
-                        className="p-1.5 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 border border-[#25D366]/30 text-[#25D366] transition-all active:scale-95 shadow-sm flex items-center justify-center"
-                        title={client.phone ? `Chamar ${client.company_name} no WhatsApp` : 'Adicionar WhatsApp'}
+                  <tr
+                    key={client.id}
+                    className="hover:bg-[#10201E]/40 transition-colors group"
+                  >
+                    {/* Empresa e Contato */}
+                    <td className="py-3.5 px-4">
+                      <Link
+                        href={`/clientes/${client.id}`}
+                        className="font-medium text-[#E7ECE8] group-hover:text-[#F1F9A1] transition-colors flex items-center gap-1.5"
                       >
-                        <WhatsAppIcon className="w-4 h-4 fill-current" />
-                      </button>
-
-                      {/* Botão Gerar Mensagem WhatsApp */}
-                      <button
-                        onClick={() => handleOpenMessageModal(client)}
-                        className="p-1.5 rounded-xl bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.12)] text-[#8EB69B] hover:text-[#F1F9A1] transition-all flex items-center justify-center active:scale-95"
-                        title="Gerar Mensagem para WhatsApp"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                      </button>
-
-                      {/* Botão Olho: Ficha do Cliente */}
-                      <Link href={`/clientes/${client.id}`} title="Abrir Ficha do Cliente">
-                        <button className="p-1.5 rounded-xl bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.12)] text-[#8EB69B] hover:text-[#F1F9A1] transition-all flex items-center justify-center active:scale-95">
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
+                        <span>{client.company_name}</span>
+                        <ArrowUpRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </Link>
+                      <div className="text-[11px] text-[#9BA6A0] mt-0.5 flex items-center gap-2 flex-wrap">
+                        <span>{client.name}</span>
+                        {client.email && (
+                          <>
+                            <span>•</span>
+                            <span className="flex items-center gap-1 text-[#65706A]">
+                              <Mail className="w-3 h-3" />
+                              {client.email}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </td>
 
-                      {/* Botão Editar */}
-                      <button
-                        onClick={() => handleEdit(client)}
-                        className="p-1.5 rounded-xl bg-[#10201E] hover:bg-[#163832] text-[#8EB69B] hover:text-[#E7ECE8] transition-colors"
-                        title="Editar cliente"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
+                    {/* Segmento */}
+                    <td className="py-3.5 px-4">
+                      <span className="text-[11px] font-mono text-[#8EB69B] px-2 py-0.5 rounded bg-[#10201E] border border-[rgba(218,241,222,0.06)]">
+                        {client.segment}
+                      </span>
+                    </td>
 
-                      {/* Botão Excluir */}
-                      <button
-                        onClick={() => handleDelete(client.id)}
-                        className="p-1.5 rounded-xl bg-[#10201E] hover:bg-red-500/20 text-[#65706A] hover:text-red-400 transition-colors"
-                        title="Excluir cliente"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                    {/* Site / Link */}
+                    <td className="py-3.5 px-4">
+                      {primaryWebsite ? (
+                        <div className="flex flex-col gap-1 items-start">
+                          {websites.map((url, idx) => (
+                            <a
+                              key={idx}
+                              href={formatExternalUrl(url)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.1)] text-[#F1F9A1] font-mono text-[11px] transition-colors"
+                              title={url}
+                            >
+                              <Globe className="w-3 h-3 text-[#8EB69B] shrink-0" />
+                              <span className="max-w-[150px] truncate">{formatDisplayUrl(url)}</span>
+                              <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                            </a>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-[#65706A] italic text-[11px]">Sem site vinculado</span>
+                      )}
+                    </td>
+
+                    {/* Telefone / WhatsApp */}
+                    <td className="py-3.5 px-4 font-mono text-xs">
+                      {clientPhone ? (
+                        <span className="text-[#8EB69B]">{clientPhone}</span>
+                      ) : (
+                        <span className="text-[#65706A] italic">Não informado</span>
+                      )}
+                    </td>
+
+                    {/* LTV */}
+                    <td className="py-3.5 px-4 text-right font-mono font-semibold text-[#F1F9A1]">
+                      R$ {(client.lifetime_value || 0).toLocaleString('pt-BR')}
+                    </td>
+
+                    {/* Ações: WhatsApp, Instagram, Maps, Editar e Excluir */}
+                    <td className="py-3.5 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {/* Botão WhatsApp */}
+                        <button
+                          type="button"
+                          onClick={() => handleDirectWhatsApp(clientPhone, client.company_name, client)}
+                          className="p-1.5 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 border border-[#25D366]/30 text-[#25D366] transition-all active:scale-95 shadow-sm flex items-center justify-center"
+                          title={clientPhone ? `Chamar ${client.company_name} no WhatsApp` : 'Adicionar WhatsApp'}
+                        >
+                          <WhatsAppIcon className="w-4 h-4 fill-current" />
+                        </button>
+
+                        {/* Botão Instagram */}
+                        <button
+                          type="button"
+                          onClick={() => handleDirectInstagram(clientInstagram, client.company_name, client)}
+                          className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
+                            clientInstagram
+                              ? 'bg-pink-500/15 hover:bg-pink-500/25 border-pink-500/30 text-pink-400'
+                              : 'bg-[#10201E] hover:bg-pink-500/15 border-[rgba(218,241,222,0.1)] text-[#9BA6A0] hover:text-pink-400'
+                          }`}
+                          title={
+                            clientInstagram
+                              ? `Abrir Instagram de ${client.company_name} (${clientInstagram})`
+                              : 'Cadastrar ou abrir Instagram do cliente'
+                          }
+                        >
+                          <Instagram className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Botão Google Maps / Google Meu Negócio */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDirectMaps(
+                              clientGoogleBusiness,
+                              client.company_name,
+                              linkedLead?.city
+                            )
+                          }
+                          className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
+                            clientGoogleBusiness
+                              ? 'bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/30 text-blue-400'
+                              : 'bg-[#10201E] hover:bg-blue-500/15 border-[rgba(218,241,222,0.1)] text-[#9BA6A0] hover:text-blue-400'
+                          }`}
+                          title={
+                            clientGoogleBusiness
+                              ? `Abrir Google Meu Negócio / Maps (${clientGoogleBusiness})`
+                              : `Ver ${client.company_name} no Google Maps`
+                          }
+                        >
+                          <MapPin className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Botão Editar */}
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(client)}
+                          className="p-1.5 rounded-xl bg-[#10201E] hover:bg-[#163832] text-[#8EB69B] hover:text-[#E7ECE8] transition-colors"
+                          title="Editar cliente"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Botão Excluir */}
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(client.id)}
+                          className="p-1.5 rounded-xl bg-[#10201E] hover:bg-red-500/20 text-[#65706A] hover:text-red-400 transition-colors"
+                          title="Excluir cliente"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
                 );
               })}
             </tbody>
@@ -357,68 +416,101 @@ export default function ClientesPage() {
         title={editId ? 'Editar Cliente' : 'Cadastrar Novo Cliente'}
         subtitle={
           editId
-            ? 'Altere os dados básicos do cliente'
+            ? 'Altere os dados básicos e links sociais do cliente'
             : 'Preencha os dados básicos do novo cliente'
         }
         maxWidth="md"
       >
         <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">
-              Nome do Cliente / Contato *
-            </label>
-            <input
-              type="text"
-              value={cName}
-              onChange={(e) => setCName(e.target.value)}
-              placeholder="Ex: Dra Dulce"
-              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">
+                Nome do Cliente / Contato *
+              </label>
+              <input
+                type="text"
+                value={cName}
+                onChange={(e) => setCName(e.target.value)}
+                placeholder="Ex: Dra Dulce"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">
+                Empresa / Razão Social *
+              </label>
+              <input
+                type="text"
+                value={cCompany}
+                onChange={(e) => setCCompany(e.target.value)}
+                placeholder="Ex: Dulce Guerra Advocacia"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">
-              Empresa / Razão Social *
-            </label>
-            <input
-              type="text"
-              value={cCompany}
-              onChange={(e) => setCCompany(e.target.value)}
-              placeholder="Ex: Dulce Guerra Advocacia"
-              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">
-              Segmento / Nicho
-            </label>
-            <select
-              value={cSegment}
-              onChange={(e) => setCSegment(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs appearance-none"
-            >
-              <option value="" disabled>
-                Selecione um Nicho
-              </option>
-              <option value="Geral">Geral</option>
-              {crmService.getNiches().map((niche) => (
-                <option key={niche.id} value={niche.name}>
-                  {niche.name}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">
+                Segmento / Nicho
+              </label>
+              <select
+                value={cSegment}
+                onChange={(e) => setCSegment(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs appearance-none"
+              >
+                <option value="" disabled>
+                  Selecione um Nicho
                 </option>
-              ))}
-            </select>
+                <option value="Geral">Geral</option>
+                {crmService.getNiches().map((niche) => (
+                  <option key={niche.id} value={niche.name}>
+                    {niche.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">
+                Link do Site
+              </label>
+              <input
+                type="url"
+                value={cWebsite}
+                onChange={(e) => setCWebsite(e.target.value)}
+                placeholder="Ex: https://dulceguerraadvocacia.com.br"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs font-mono"
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">
-              Link do Site (caso possua site / landing page)
-            </label>
-            <input
-              type="url"
-              value={cWebsite}
-              onChange={(e) => setCWebsite(e.target.value)}
-              placeholder="Ex: https://dulceguerraadvocacia.com.br"
-              className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs font-mono"
-            />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">
+                Instagram (@perfil ou link)
+              </label>
+              <input
+                type="text"
+                value={cInstagram}
+                onChange={(e) => setCInstagram(e.target.value)}
+                placeholder="Ex: @dulceguerraadvocacia"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">
+                Google Meu Negócio / Link Maps
+              </label>
+              <input
+                type="text"
+                value={cGoogleBusiness}
+                onChange={(e) => setCGoogleBusiness(e.target.value)}
+                placeholder="Link do Maps ou nome da ficha"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-surface)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:border-[#8EB69B] text-xs"
+              />
+            </div>
           </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">
@@ -455,13 +547,6 @@ export default function ClientesPage() {
           </div>
         </div>
       </Modal>
-
-      {/* Modal Gerar Mensagem WhatsApp (Anexo 1) */}
-      <GenerateMessageModal
-        isOpen={Boolean(messageTarget)}
-        onClose={() => setMessageTarget(null)}
-        target={messageTarget}
-      />
     </div>
   );
 }

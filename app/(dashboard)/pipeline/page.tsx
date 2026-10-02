@@ -1,13 +1,15 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
 import { getSupabase } from '@/lib/supabase/client';
+import { parseLeadFromSupabase, dbService } from '@/lib/supabase/db-service';
 import { crmService } from '@/lib/services/crm-service';
 import { Lead, Opportunity, PipelineStage, Temperature } from '@/types/database';
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
+import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
+import { openWhatsApp, cleanPhoneNumber } from '@/lib/utils/whatsapp';
+import { openInstagramProfile, openGoogleMapsProfile } from '@/lib/utils/social-links';
 import {
   Kanban,
   List,
@@ -17,10 +19,11 @@ import {
   Pencil,
   Trash2,
   Search,
-  CheckCircle2,
   RefreshCw,
   Building2,
   User,
+  Instagram,
+  MapPin,
 } from 'lucide-react';
 
 interface SupabaseOpportunityRow {
@@ -70,10 +73,37 @@ export default function PipelinePage() {
   const [editValue, setEditValue] = useState('');
   const [editProbability, setEditProbability] = useState('50');
   const [editStatus, setEditStatus] = useState('aberta');
+  const [editWhatsapp, setEditWhatsapp] = useState('');
+  const [editInstagram, setEditInstagram] = useState('');
+  const [editGoogleBusiness, setEditGoogleBusiness] = useState('');
 
   const mapRowToOpportunity = useCallback(
-    (row: SupabaseOpportunityRow, stageMap: Map<string, PipelineStage>): Opportunity => {
-      const leadObj = Array.isArray(row.leads) ? row.leads[0] : row.leads;
+    (
+      row: SupabaseOpportunityRow,
+      stageMap: Map<string, PipelineStage>,
+      allLeads: Lead[] = []
+    ): Opportunity => {
+      const rawLeadObj = Array.isArray(row.leads) ? row.leads[0] : row.leads;
+      let leadObj: Partial<Lead> | null = rawLeadObj
+        ? parseLeadFromSupabase(rawLeadObj)
+        : null;
+
+      // Fallback para encontrar o lead pelo título/nome caso lead_id esteja NULL
+      if (!leadObj && allLeads.length > 0 && row.title) {
+        const normTitle = row.title
+          .replace(/^oportunidade\s*-\s*/i, '')
+          .trim()
+          .toLowerCase();
+        const matched = allLeads.find(
+          (l) =>
+            (l.company_name || '').trim().toLowerCase() === normTitle ||
+            (l.name || '').trim().toLowerCase() === normTitle
+        );
+        if (matched) {
+          leadObj = matched;
+        }
+      }
+
       const stage = stageMap.get(row.stage_id);
 
       const companyName =
@@ -88,7 +118,7 @@ export default function PipelinePage() {
 
       return {
         id: row.id,
-        lead_id: row.lead_id ?? null,
+        lead_id: row.lead_id ?? (leadObj?.id || null),
         stage_id: row.stage_id,
         company_id: row.company_id ?? null,
         title: row.title || companyName,
@@ -133,7 +163,7 @@ export default function PipelinePage() {
           ),
         supabase
           .from('leads')
-          .select('id, name, company_name, segment, phone, whatsapp, email, temperature, score')
+          .select('*')
           .order('created_at', { ascending: false }),
       ]);
 
@@ -146,23 +176,24 @@ export default function PipelinePage() {
 
       const loadedStages = (stagesRes.data || []) as PipelineStage[];
       setStages(loadedStages);
-
       setNewStageId((prev) => prev || (loadedStages[0]?.id ?? ''));
+
+      const parsedLeads: Lead[] =
+        !leadsRes.error && leadsRes.data
+          ? leadsRes.data.map((r: any) => parseLeadFromSupabase(r))
+          : [];
+      setLeadsList(parsedLeads);
 
       const stageMap = new Map<string, PipelineStage>(
         loadedStages.map((s) => [s.id, s])
       );
 
       const loadedOpps = ((oppsRes.data || []) as SupabaseOpportunityRow[]).map((row) =>
-        mapRowToOpportunity(row, stageMap)
+        mapRowToOpportunity(row, stageMap, parsedLeads)
       );
 
       setOpportunities(loadedOpps);
       crmService.setOpportunitiesFromSupabase(loadedOpps);
-
-      if (!leadsRes.error && leadsRes.data) {
-        setLeadsList(leadsRes.data as Lead[]);
-      }
     } catch (err: any) {
       console.error('Erro ao carregar Pipeline do Supabase:', err);
       setErrorMsg(err?.message || 'Erro ao conectar com o Supabase.');
@@ -288,7 +319,7 @@ export default function PipelinePage() {
       }
 
       const stageMap = new Map<string, PipelineStage>(stages.map((s) => [s.id, s]));
-      const createdOpp = mapRowToOpportunity(data as SupabaseOpportunityRow, stageMap);
+      const createdOpp = mapRowToOpportunity(data as SupabaseOpportunityRow, stageMap, leadsList);
 
       const nextOpps = [createdOpp, ...opportunities];
       setOpportunities(nextOpps);
@@ -316,6 +347,7 @@ export default function PipelinePage() {
   // Abrir modal de edição
   const handleOpenEditModal = (opp: Opportunity, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    const leadData = opp.leads;
     setEditingOpp(opp);
     setEditTitle(opp.title || '');
     setEditLeadId(opp.lead_id || '');
@@ -323,9 +355,12 @@ export default function PipelinePage() {
     setEditValue(String(opp.estimated_value ?? 0));
     setEditProbability(String(opp.probability ?? 50));
     setEditStatus(opp.status || 'aberta');
+    setEditWhatsapp(leadData?.whatsapp || leadData?.phone || '');
+    setEditInstagram(leadData?.instagram || '');
+    setEditGoogleBusiness(leadData?.google_business || '');
   };
 
-  // Salvar edição diretamente em public.opportunities
+  // Salvar edição diretamente em public.opportunities (e atualizar canais do lead se houver)
   const handleSaveEditOpp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingOpp) return;
@@ -337,9 +372,21 @@ export default function PipelinePage() {
     setIsSavingEdit(true);
     try {
       const supabase = getSupabase();
+      const targetLeadId = editLeadId ? editLeadId : null;
+
+      // Se houver lead vinculado, atualizar também WhatsApp / Instagram / Google Meu Negócio
+      if (targetLeadId) {
+        await dbService.updateLead(targetLeadId, {
+          whatsapp: editWhatsapp.trim() || undefined,
+          phone: editWhatsapp.trim() || undefined,
+          instagram: editInstagram.trim() || undefined,
+          google_business: editGoogleBusiness.trim() || undefined,
+        });
+      }
+
       const payload = {
         title: editTitle.trim(),
-        lead_id: editLeadId ? editLeadId : null,
+        lead_id: targetLeadId,
         stage_id: editStageId || editingOpp.stage_id,
         estimated_value: Number(editValue) || 0,
         probability: Math.min(100, Math.max(0, Number(editProbability) || 0)),
@@ -360,7 +407,7 @@ export default function PipelinePage() {
       }
 
       const stageMap = new Map<string, PipelineStage>(stages.map((s) => [s.id, s]));
-      const updatedOpp = mapRowToOpportunity(data as SupabaseOpportunityRow, stageMap);
+      const updatedOpp = mapRowToOpportunity(data as SupabaseOpportunityRow, stageMap, leadsList);
 
       const nextOpps = opportunities.map((o) => (o.id === editingOpp.id ? updatedOpp : o));
       setOpportunities(nextOpps);
@@ -404,6 +451,45 @@ export default function PipelinePage() {
     if (editingOpp?.id === id) {
       setEditingOpp(null);
     }
+  };
+
+  // Ações rápidas nos cards: WhatsApp, Instagram e Maps
+  const handleOppWhatsApp = (opp: Opportunity, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const phone = opp.leads?.whatsapp || opp.leads?.phone;
+    if (!phone || !cleanPhoneNumber(phone)) {
+      if (
+        confirm(
+          `A oportunidade "${opp.title}" ainda não possui WhatsApp cadastrado. Deseja cadastrar agora?`
+        )
+      ) {
+        handleOpenEditModal(opp);
+      }
+      return;
+    }
+    openWhatsApp(phone);
+  };
+
+  const handleOppInstagram = (opp: Opportunity, e: React.MouseEvent) => {
+    e.stopPropagation();
+    openInstagramProfile(opp.leads?.instagram, opp.company_name || opp.title, () => {
+      if (
+        confirm(
+          `A oportunidade "${opp.title}" ainda não possui Instagram cadastrado. Deseja cadastrar agora?`
+        )
+      ) {
+        handleOpenEditModal(opp);
+      }
+    });
+  };
+
+  const handleOppMaps = (opp: Opportunity, e: React.MouseEvent) => {
+    e.stopPropagation();
+    openGoogleMapsProfile(
+      opp.leads?.google_business,
+      opp.leads?.company_name || opp.company_name || opp.title,
+      opp.leads?.city
+    );
   };
 
   const totalPipelineValue = opportunities
@@ -593,7 +679,10 @@ export default function PipelinePage() {
                 <div className="p-3 space-y-3 flex-1 overflow-y-auto max-h-[68vh] min-h-[160px]">
                   {stageOpps.map((opp) => {
                     const leadData = opp.leads;
-                    const hasLead = Boolean(opp.lead_id && leadData);
+                    const hasLead = Boolean(leadData);
+                    const hasPhone = Boolean(leadData?.whatsapp || leadData?.phone);
+                    const hasInstagram = Boolean(leadData?.instagram);
+                    const hasMaps = Boolean(leadData?.google_business);
 
                     return (
                       <div
@@ -654,6 +743,63 @@ export default function PipelinePage() {
                                 Sem lead vinculado
                               </div>
                             )}
+                          </div>
+
+                          {/* 3 Botões Rápidos no Card: WhatsApp, Instagram e Google Maps */}
+                          <div className="flex items-center gap-1.5 mt-2.5 pt-2 border-t border-[rgba(218,241,222,0.04)]">
+                            {/* Botão WhatsApp */}
+                            <button
+                              type="button"
+                              onClick={(e) => handleOppWhatsApp(opp, e)}
+                              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
+                                hasPhone
+                                  ? 'bg-[#25D366]/15 hover:bg-[#25D366]/25 border-[#25D366]/30 text-[#25D366]'
+                                  : 'bg-[#07100F]/60 hover:bg-[#25D366]/15 border-[rgba(218,241,222,0.08)] text-[#65706A] hover:text-[#25D366]'
+                              }`}
+                              title={
+                                hasPhone
+                                  ? `Chamar no WhatsApp (${leadData?.whatsapp || leadData?.phone})`
+                                  : 'Cadastrar ou chamar no WhatsApp'
+                              }
+                            >
+                              <WhatsAppIcon className="w-3.5 h-3.5 fill-current" />
+                            </button>
+
+                            {/* Botão Instagram */}
+                            <button
+                              type="button"
+                              onClick={(e) => handleOppInstagram(opp, e)}
+                              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
+                                hasInstagram
+                                  ? 'bg-pink-500/15 hover:bg-pink-500/25 border-pink-500/30 text-pink-400'
+                                  : 'bg-[#07100F]/60 hover:bg-pink-500/15 border-[rgba(218,241,222,0.08)] text-[#65706A] hover:text-pink-400'
+                              }`}
+                              title={
+                                hasInstagram
+                                  ? `Abrir Instagram (${leadData?.instagram})`
+                                  : 'Cadastrar ou abrir Instagram'
+                              }
+                            >
+                              <Instagram className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Botão Google Maps / Google Meu Negócio */}
+                            <button
+                              type="button"
+                              onClick={(e) => handleOppMaps(opp, e)}
+                              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center justify-center ${
+                                hasMaps
+                                  ? 'bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/30 text-blue-400'
+                                  : 'bg-[#07100F]/60 hover:bg-blue-500/15 border-[rgba(218,241,222,0.08)] text-[#65706A] hover:text-blue-400'
+                              }`}
+                              title={
+                                hasMaps
+                                  ? `Abrir Google Meu Negócio / Maps (${leadData?.google_business})`
+                                  : `Buscar ${opp.title} no Google Maps`
+                              }
+                            >
+                              <MapPin className="w-3.5 h-3.5" />
+                            </button>
                           </div>
 
                           {/* Confirmação rápida de exclusão */}
@@ -814,6 +960,10 @@ export default function PipelinePage() {
                   <tbody className="divide-y divide-[rgba(218,241,222,0.05)]">
                     {filteredListOpps.map((opp) => {
                       const leadData = opp.leads;
+                      const hasPhone = Boolean(leadData?.whatsapp || leadData?.phone);
+                      const hasInstagram = Boolean(leadData?.instagram);
+                      const hasMaps = Boolean(leadData?.google_business);
+
                       return (
                         <tr
                           key={opp.id}
@@ -826,7 +976,7 @@ export default function PipelinePage() {
                           </td>
 
                           <td className="py-3.5 px-4">
-                            {opp.lead_id && leadData ? (
+                            {leadData ? (
                               <div>
                                 <div className="text-[#E7ECE8] font-medium">
                                   {leadData.company_name || leadData.name}
@@ -875,13 +1025,67 @@ export default function PipelinePage() {
 
                           <td className="py-3.5 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
+                              {/* Botão WhatsApp */}
+                              <button
+                                type="button"
+                                onClick={(e) => handleOppWhatsApp(opp, e)}
+                                className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
+                                  hasPhone
+                                    ? 'bg-[#25D366]/15 hover:bg-[#25D366]/25 border-[#25D366]/30 text-[#25D366]'
+                                    : 'bg-[#10201E] hover:bg-[#25D366]/15 border-[rgba(218,241,222,0.1)] text-[#9BA6A0] hover:text-[#25D366]'
+                                }`}
+                                title={
+                                  hasPhone
+                                    ? `Chamar no WhatsApp (${leadData?.whatsapp || leadData?.phone})`
+                                    : 'Cadastrar ou chamar no WhatsApp'
+                                }
+                              >
+                                <WhatsAppIcon className="w-4 h-4 fill-current" />
+                              </button>
+
+                              {/* Botão Instagram */}
+                              <button
+                                type="button"
+                                onClick={(e) => handleOppInstagram(opp, e)}
+                                className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
+                                  hasInstagram
+                                    ? 'bg-pink-500/15 hover:bg-pink-500/25 border-pink-500/30 text-pink-400'
+                                    : 'bg-[#10201E] hover:bg-pink-500/15 border-[rgba(218,241,222,0.1)] text-[#9BA6A0] hover:text-pink-400'
+                                }`}
+                                title={
+                                  hasInstagram
+                                    ? `Abrir Instagram (${leadData?.instagram})`
+                                    : 'Cadastrar ou abrir Instagram'
+                                }
+                              >
+                                <Instagram className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* Botão Google Maps / Google Meu Negócio */}
+                              <button
+                                type="button"
+                                onClick={(e) => handleOppMaps(opp, e)}
+                                className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
+                                  hasMaps
+                                    ? 'bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/30 text-blue-400'
+                                    : 'bg-[#10201E] hover:bg-blue-500/15 border-[rgba(218,241,222,0.1)] text-[#9BA6A0] hover:text-blue-400'
+                                }`}
+                                title={
+                                  hasMaps
+                                    ? `Abrir Google Meu Negócio / Maps (${leadData?.google_business})`
+                                    : `Buscar ${opp.title} no Google Maps`
+                                }
+                              >
+                                <MapPin className="w-3.5 h-3.5" />
+                              </button>
+
                               <button
                                 type="button"
                                 onClick={(e) => handleOpenEditModal(opp, e)}
-                                className="px-2.5 py-1.5 rounded-xl bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#F1F9A1] text-xs flex items-center gap-1 transition-all"
+                                className="p-1.5 rounded-xl bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.1)] text-[#8EB69B] hover:text-[#F1F9A1] transition-all"
+                                title="Editar oportunidade"
                               >
                                 <Pencil className="w-3.5 h-3.5" />
-                                <span>Editar</span>
                               </button>
 
                               {deletingOppId === opp.id ? (
@@ -912,6 +1116,7 @@ export default function PipelinePage() {
                                     setDeletingOppId(opp.id);
                                   }}
                                   className="p-1.5 rounded-xl bg-[#10201E] hover:bg-red-500/20 border border-[rgba(218,241,222,0.06)] text-[#65706A] hover:text-red-400 transition-colors"
+                                  title="Excluir oportunidade"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
@@ -1085,7 +1290,16 @@ export default function PipelinePage() {
               </label>
               <select
                 value={editLeadId}
-                onChange={(e) => setEditLeadId(e.target.value)}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setEditLeadId(id);
+                  const found = leadsList.find((l) => l.id === id);
+                  if (found) {
+                    setEditWhatsapp(found.whatsapp || found.phone || '');
+                    setEditInstagram(found.instagram || '');
+                    setEditGoogleBusiness(found.google_business || '');
+                  }
+                }}
                 className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
               >
                 <option value="">Sem lead vinculado (NULL)</option>
@@ -1156,6 +1370,47 @@ export default function PipelinePage() {
               </select>
             </div>
           </div>
+
+          {editLeadId && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-[rgba(218,241,222,0.05)]">
+              <div>
+                <label className="block text-[#9BA6A0] mb-1 font-medium">
+                  WhatsApp do Lead
+                </label>
+                <input
+                  type="text"
+                  placeholder="(11) 99999-9999"
+                  value={editWhatsapp}
+                  onChange={(e) => setEditWhatsapp(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[#9BA6A0] mb-1 font-medium">
+                  Instagram do Lead
+                </label>
+                <input
+                  type="text"
+                  placeholder="@perfil"
+                  value={editInstagram}
+                  onChange={(e) => setEditInstagram(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[#9BA6A0] mb-1 font-medium">
+                  Google Meu Negócio / Maps
+                </label>
+                <input
+                  type="text"
+                  placeholder="Link ou nome no Maps"
+                  value={editGoogleBusiness}
+                  onChange={(e) => setEditGoogleBusiness(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+                />
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-between pt-3 border-t border-[rgba(218,241,222,0.06)]">
             {editingOpp && (

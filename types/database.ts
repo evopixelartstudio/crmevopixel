@@ -149,6 +149,8 @@ export interface Client {
   email?: string;
   phone?: string;
   whatsapp?: string;
+  instagram?: string;
+  google_business?: string;
   website_url?: string;
   total_contracted: number;
   total_received: number;

@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 import { openWhatsApp, cleanPhoneNumber } from '@/lib/utils/whatsapp';
+import { openInstagramProfile, openGoogleMapsProfile } from '@/lib/utils/social-links';
 import { formatPhoneNumber } from '@/lib/utils';
 import { GenerateMessageModal, TargetEntity } from '@/components/modals/GenerateMessageModal';
 import { qualifyLeadWithAI } from '@/lib/ai/qualification';
@@ -630,11 +631,12 @@ export default function LeadsPage() {
                       </span>
                     </td>
 
-                    {/* Ações: WhatsApp, Colocar no Pipeline, Gerar Mensagem & Excluir */}
+                    {/* Ações: WhatsApp, Instagram, Maps, Colocar no Pipeline, Gerar Mensagem & Excluir */}
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         {/* Botão Chamar no WhatsApp (Só a logo + adiciona ao Pipeline no 1º contato) */}
                         <button
+                          type="button"
                           onClick={() => handleDirectWhatsApp(lead)}
                           className="p-1.5 rounded-xl bg-[#25D366]/15 hover:bg-[#25D366]/25 border border-[#25D366]/30 text-[#25D366] transition-all active:scale-95 shadow-sm flex items-center justify-center"
                           title={`Chamar ${lead.company_name} no WhatsApp (Inicia Primeiro Contato e insere no Pipeline)`}
@@ -642,8 +644,51 @@ export default function LeadsPage() {
                           <WhatsAppIcon className="w-4 h-4 fill-current" />
                         </button>
 
+                        {/* Botão Instagram */}
+                        <button
+                          type="button"
+                          onClick={() => openInstagramProfile(lead.instagram, lead.company_name)}
+                          className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
+                            lead.instagram
+                              ? 'bg-pink-500/15 hover:bg-pink-500/25 border-pink-500/30 text-pink-400'
+                              : 'bg-[#10201E] hover:bg-pink-500/15 border-[rgba(218,241,222,0.12)] text-[#9BA6A0] hover:text-pink-400'
+                          }`}
+                          title={
+                            lead.instagram
+                              ? `Abrir Instagram de ${lead.company_name} (${lead.instagram})`
+                              : 'Instagram não informado'
+                          }
+                        >
+                          <Instagram className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Botão Google Meu Negócio / Maps */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openGoogleMapsProfile(
+                              lead.google_business,
+                              lead.company_name,
+                              lead.city
+                            )
+                          }
+                          className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
+                            lead.google_business
+                              ? 'bg-blue-500/15 hover:bg-blue-500/25 border-blue-500/30 text-blue-400'
+                              : 'bg-[#10201E] hover:bg-blue-500/15 border-[rgba(218,241,222,0.12)] text-[#9BA6A0] hover:text-blue-400'
+                          }`}
+                          title={
+                            lead.google_business
+                              ? `Abrir Google Meu Negócio / Maps (${lead.google_business})`
+                              : `Ver ${lead.company_name} no Google Maps`
+                          }
+                        >
+                          <MapPin className="w-3.5 h-3.5" />
+                        </button>
+
                         {/* Botão Colocar no Pipeline */}
                         <button
+                          type="button"
                           onClick={(e) => handleAddToPipeline(lead, e)}
                           className={`p-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
                             isInPipeline
@@ -661,6 +706,7 @@ export default function LeadsPage() {
 
                         {/* Botão Gerar Mensagem (Anexo 1) */}
                         <button
+                          type="button"
                           onClick={() => handleOpenMessageModal(lead)}
                           className="p-1.5 rounded-xl bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.12)] text-[#8EB69B] hover:text-[#F1F9A1] transition-all active:scale-95 flex items-center justify-center"
                           title="Gerar Mensagem para WhatsApp"
@@ -670,6 +716,7 @@ export default function LeadsPage() {
 
                         {/* Botão Excluir */}
                         <button
+                          type="button"
                           onClick={(e) => handleDeleteLead(lead.id, e)}
                           className="p-1.5 rounded-xl bg-[#10201E] hover:bg-red-500/20 text-[#65706A] hover:text-red-400 transition-colors"
                           title="Excluir lead"

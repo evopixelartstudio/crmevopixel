@@ -63,7 +63,7 @@ function sanitizeLeadForSupabase(lead: Partial<Lead>): any {
   return payload;
 }
 
-function parseLeadFromSupabase(row: any): Lead {
+export function parseLeadFromSupabase(row: any): Lead {
   let google_business = row.google_business || '';
   let services: string[] = Array.isArray(row.services) ? row.services : [];
   let sequence_progress = row.sequence_progress;
@@ -129,8 +129,8 @@ export class DatabaseService {
       }
 
       let { error } = await supabase.from('clients').upsert([dataToInsert]);
-      if (error && dataToInsert.website_url !== undefined) {
-        const { website_url, ...fallbackData } = dataToInsert;
+      if (error) {
+        const { website_url, instagram, google_business, ...fallbackData } = dataToInsert;
         const retry = await supabase.from('clients').upsert([fallbackData]);
         error = retry.error;
       }
@@ -154,8 +154,8 @@ export class DatabaseService {
       }
 
       let { error } = await supabase.from('clients').update(dataToUpdate).eq('id', id);
-      if (error && dataToUpdate.website_url !== undefined) {
-        const { website_url, ...fallbackData } = dataToUpdate;
+      if (error) {
+        const { website_url, instagram, google_business, ...fallbackData } = dataToUpdate;
         const retry = await supabase.from('clients').update(fallbackData).eq('id', id);
         error = retry.error;
       }
