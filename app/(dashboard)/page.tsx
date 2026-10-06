@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { crmService } from '@/lib/services/crm-service';
+import { getSalesByNiche } from '@/lib/services/sales-by-niche';
+import { SalesByNicheChart } from '@/components/dashboard/SalesByNicheChart';
 import { useCrmSync } from '@/lib/hooks/useCrmSync';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -46,6 +48,7 @@ export default function DashboardPage() {
   const opportunities = crmService.getOpportunities();
   const projects = crmService.getProjects();
   const tasks = crmService.getTasks();
+  const salesByNiche = getSalesByNiche(crmService.getHistoricalProjects(), projects, opportunities, leads, clients, period);
 
   const activeProjects = projects.filter((p) => p.status !== 'concluido' && p.status !== 'cancelado');
   const pendingTasks = tasks.filter((t) => t.status !== 'concluida');
@@ -249,6 +252,8 @@ export default function DashboardPage() {
           <ArrowUpRight className="w-4 h-4 text-[#65706A] group-hover:text-[#F1F9A1] transition-colors" />
         </Link>
       </div>
+
+      <SalesByNicheChart data={salesByNiche} />
 
       {/* Linha 3: Evolução Mensal & Radar de Atenção */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

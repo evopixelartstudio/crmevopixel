@@ -32,6 +32,29 @@ const dbPath = require.resolve('../lib/supabase/db-service.ts');
 require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { dbService } };
 const { crmService } = require('../lib/services/crm-service.ts');
 const { parseSpreadsheetLeads, recoverSpreadsheetBusinessName } = require('../lib/services/spreadsheet-leads.ts');
+const { getSalesByNiche } = require('../lib/services/sales-by-niche.ts');
+
+test('sales pie counts sold niches only, excludes canceled/open records and deduplicates mirrored sales', () => {
+  const historical = [
+    { id: 'h1', company_name: 'Alfa', segment: 'Advocacia', amount_contracted: 100, project_date: '2026-10-06', status: 'liquidado', notes: 'Pipeline (o1)' },
+    { id: 'h2', company_name: 'Beta', segment: 'advocacia', amount_contracted: 200, project_date: '2026-10-06', status: 'parcial' },
+    { id: 'h3', company_name: 'Canceled', segment: 'Cancelado', amount_contracted: 200, project_date: '2026-10-06', status: 'cancelado' },
+  ];
+  const projects = [
+    { id: 'p1', company_name: 'Alfa', segment: 'Advocacia', amount_contracted: 100, deadline: '2026-10-06', status: 'concluido' },
+    { id: 'p2', company_name: 'Gamma', segment: 'Odonto', amount_contracted: 100, deadline: '2026-10-06', status: 'concluido' },
+    { id: 'p3', company_name: 'Open', segment: 'Aberto', amount_contracted: 100, deadline: '2026-10-06', status: 'briefing' },
+  ];
+  const opportunities = [
+    { id: 'o1', company_name: 'Alfa', stage_slug: 'fechado', estimated_value: 100, updated_at: '2026-10-06' },
+    { id: 'o2', company_name: 'Lead only', stage_slug: 'proposta', leads: { segment: 'Prospecção' }, estimated_value: 100 },
+  ];
+  const result = getSalesByNiche(historical, projects, opportunities, [], []);
+  assert.deepEqual(result.map(item => [item.niche, item.count]), [['Advocacia', 2], ['Odonto', 1]]);
+  assert.ok(Math.abs(result.reduce((sum, item) => sum + item.percentage, 0) - 100) < 0.001);
+  assert.deepEqual(getSalesByNiche(historical, projects, opportunities, [], [], 'hoje', new Date('2026-10-07T12:00:00')), []);
+  assert.deepEqual(getSalesByNiche([], [], [], [], []), []);
+});
 
 test('proposal uses the supplied payment link and never invents a Mercado Pago link', () => {
   const filename = path.resolve(__dirname, '../app/(dashboard)/pipeline/page.tsx');
