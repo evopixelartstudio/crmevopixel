@@ -1,5 +1,7 @@
 'use client';
 
+import { loadRabiscoBoard, saveRabiscoBoard, type RabiscoBoard } from '@/lib/services/rabisco-storage';
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   MousePointer,
@@ -176,7 +178,7 @@ const INITIAL_CONNECTIONS: BoardConnection[] = [
   { id: 'conn-7', fromId: 'card-6', toId: 'card-8', label: 'Sem resposta' },
 ];
 
-export default function MensagensQuadroPage() {
+export default function RabiscoPage() {
   // Dados do Quadro
   const [cards, setCards] = useState<BoardCard[]>([]);
   const [connections, setConnections] = useState<BoardConnection[]>([]);
@@ -213,54 +215,115 @@ export default function MensagensQuadroPage() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(56);
+
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const observer = new ResizeObserver(() => setHeaderHeight(header.offsetHeight));
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, []);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 2500);
   };
 
-  // Carregar dados salvos ou inicializar
+  const [boardReady, setBoardReady] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'loading' | 'saving' | 'saved' | 'error'>('loading');
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const boardRef = useRef<RabiscoBoard>({ cards: [], connections: [], strokes: [] });
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const saveRevision = useRef(0);
+
   useEffect(() => {
-    try {
-      const savedCards = localStorage.getItem(STORAGE_KEY_CARDS);
-      const savedConns = localStorage.getItem(STORAGE_KEY_CONNECTIONS);
-      const savedStrokes = localStorage.getItem(STORAGE_KEY_STROKES);
-
-      if (savedCards) {
-        setCards(JSON.parse(savedCards));
-      } else {
-        setCards(INITIAL_CARDS);
+    let cancelled = false;
+    const load = async () => {
+      try {
+        let board = await loadRabiscoBoard();
+        if (cancelled) return;
+        const migratedLegacy = !board;
+        if (!board) {
+          const readLegacy = <T,>(key: string, fallback: T[]): T[] => {
+            const raw = localStorage.getItem(key);
+            if (!raw) return fallback;
+            const value = JSON.parse(raw);
+            if (!Array.isArray(value)) throw new Error('Backup local inválido. Exporte ou recupere seus dados antes de continuar.');
+            return value as T[];
+          };
+          board = {
+            cards: readLegacy(STORAGE_KEY_CARDS, INITIAL_CARDS),
+            connections: readLegacy(STORAGE_KEY_CONNECTIONS, INITIAL_CONNECTIONS),
+            strokes: readLegacy<BoardStroke>(STORAGE_KEY_STROKES, []),
+          };
+          await saveRabiscoBoard(board);
+        }
+        if (cancelled) return;
+        boardRef.current = board;
+        setCards(board.cards);
+        setConnections(board.connections);
+        setStrokes(board.strokes);
+        setBoardReady(true);
+        setSaveStatus('saved');
+        // Remover o legado somente depois da confirmação do Supabase.
+        if (migratedLegacy) {
+          [STORAGE_KEY_CARDS, STORAGE_KEY_CONNECTIONS, STORAGE_KEY_STROKES].forEach(key => localStorage.removeItem(key));
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setStorageError(error instanceof Error ? error.message : 'Não foi possível carregar o Rabisco.');
+        setSaveStatus('error');
       }
-
-      if (savedConns) {
-        setConnections(JSON.parse(savedConns));
-      } else {
-        setConnections(INITIAL_CONNECTIONS);
-      }
-
-      if (savedStrokes) {
-        setStrokes(JSON.parse(savedStrokes));
-      }
-    } catch (e) {
-      setCards(INITIAL_CARDS);
-      setConnections(INITIAL_CONNECTIONS);
-    }
+    };
+    void load();
+    return () => { cancelled = true; };
   }, []);
 
-  // Salvar no localStorage sempre que houver alterações
+  const persistBoard = (patch: Partial<RabiscoBoard>) => {
+    if (!boardReady) return;
+    boardRef.current = { ...boardRef.current, ...patch };
+    const snapshot = boardRef.current;
+    const revision = ++saveRevision.current;
+    setSaveStatus('saving');
+    setStorageError(null);
+    // Serializar gravações para uma resposta lenta não sobrescrever uma edição recente.
+    saveQueue.current = saveQueue.current.then(async () => {
+      try {
+        await saveRabiscoBoard(snapshot);
+        if (revision === saveRevision.current) setSaveStatus('saved');
+      } catch (error) {
+        if (revision === saveRevision.current) {
+          setStorageError(error instanceof Error ? error.message : 'Não foi possível salvar.');
+          setSaveStatus('error');
+        }
+      }
+    });
+  };
+
+  useEffect(() => {
+    const warnUnsaved = (event: BeforeUnloadEvent) => {
+      if (boardReady && saveStatus !== 'saved') {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', warnUnsaved);
+    return () => window.removeEventListener('beforeunload', warnUnsaved);
+  }, [boardReady, saveStatus]);
+
   const saveCards = (newCards: BoardCard[]) => {
     setCards(newCards);
-    localStorage.setItem(STORAGE_KEY_CARDS, JSON.stringify(newCards));
+    persistBoard({ cards: newCards });
   };
-
   const saveConnections = (newConns: BoardConnection[]) => {
     setConnections(newConns);
-    localStorage.setItem(STORAGE_KEY_CONNECTIONS, JSON.stringify(newConns));
+    persistBoard({ connections: newConns });
   };
-
   const saveStrokes = (newStrokes: BoardStroke[]) => {
     setStrokes(newStrokes);
-    localStorage.setItem(STORAGE_KEY_STROKES, JSON.stringify(newStrokes));
+    persistBoard({ strokes: newStrokes });
   };
 
   // Converter coordenadas da tela (mouse) para o canvas com zoom e pan
@@ -277,18 +340,19 @@ export default function MensagensQuadroPage() {
 
   // Adicionar novo card
   const handleAddCard = (customX?: number, customY?: number) => {
-    const x = customX !== undefined ? customX : (window.innerWidth / 2 - pan.x) / zoom - 100;
-    const y = customY !== undefined ? customY : (window.innerHeight / 2 - pan.y) / zoom - 60;
+    const rect = containerRef.current?.getBoundingClientRect();
+    const x = customX !== undefined ? customX : ((rect?.width || 800) / 2 - pan.x) / zoom - 100;
+    const y = customY !== undefined ? customY : ((rect?.height || 600) / 2 - pan.y) / zoom - 60;
 
     const matchedPalette = CARD_COLORS.find((c) => c.bg === selectedColor) || CARD_COLORS[0];
 
     const newCard: BoardCard = {
-      id: `card-${Date.now()}`,
+      id: crypto.randomUUID(),
       x: Math.round(x),
       y: Math.round(y),
       width: 210,
       height: 130,
-      title: 'Nova Mensagem',
+      title: 'Novo Rabisco',
       content: 'Escreva livremente aqui sua mensagem, argumento ou script de vendas...',
       color: matchedPalette.bg,
       textColor: matchedPalette.text,
@@ -304,7 +368,7 @@ export default function MensagensQuadroPage() {
     e.stopPropagation();
     const newCard: BoardCard = {
       ...card,
-      id: `card-${Date.now()}`,
+      id: crypto.randomUUID(),
       x: card.x + 30,
       y: card.y + 30,
       title: `${card.title} (Cópia)`,
@@ -432,7 +496,9 @@ export default function MensagensQuadroPage() {
   };
 
   // Manipulação de Mouse / Toque no Canvas
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handleMouseDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('input, textarea, button')) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
     // Clique com botão do meio ou modo de seleção em área vazia -> Pan
     if (e.button === 1 || (tool === 'select' && e.target === containerRef.current)) {
       setIsPanning(true);
@@ -462,7 +528,7 @@ export default function MensagensQuadroPage() {
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handleMouseMove = (e: React.PointerEvent) => {
     // Pan do canvas
     if (isPanning) {
       setPan({
@@ -513,13 +579,26 @@ export default function MensagensQuadroPage() {
   };
 
   // Zoom pelo scroll do mouse
-  const handleWheel = (e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const handleWheel = (e: WheelEvent) => {
+      if ((e.target as HTMLElement).closest('input, textarea')) return;
       e.preventDefault();
-      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-      setZoom((prev) => Math.min(2.5, Math.max(0.3, prev * zoomFactor)));
-    }
-  };
+      if (e.ctrlKey || e.metaKey) {
+        const rect = container.getBoundingClientRect();
+        const nextZoom = Math.min(2.5, Math.max(0.3, zoom * (e.deltaY < 0 ? 1.08 : 0.92)));
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        setPan({ x: x - (x - pan.x) * nextZoom / zoom, y: y - (y - pan.y) * nextZoom / zoom });
+        setZoom(nextZoom);
+      } else {
+        setPan(previous => ({ x: previous.x - e.deltaX, y: previous.y - e.deltaY }));
+      }
+    };
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [pan, zoom]);
 
   // Calcular curva Bézier suave entre dois cards para conexões estilo Miro
   const getCurvePath = (c1: BoardCard, c2: BoardCard) => {
@@ -545,18 +624,26 @@ export default function MensagensQuadroPage() {
   };
 
   return (
-    <div className="relative w-full h-[calc(100vh-4rem)] bg-[#050706] overflow-hidden select-none flex flex-col font-sans">
+    <div className="relative w-full h-full min-h-0 bg-[#050706] overflow-hidden select-none flex flex-col font-sans">
+      {!boardReady && <div className="absolute inset-0 z-50 bg-[#07100F] flex flex-col items-center justify-center gap-3 p-6 text-[#E7ECE8]">
+        <p role="status">{storageError || 'Carregando Rabisco do Supabase...'}</p>
+        {storageError && <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-xl bg-[#10201E]">Tentar novamente</button>}
+      </div>}
+      {boardReady && <div className="absolute bottom-3 left-20 z-40 max-w-[calc(100%-6rem)] rounded-xl bg-[#10201E] px-3 py-2 text-xs text-[#E7ECE8]" role="status">
+        {saveStatus === 'saved' ? 'Salvo no Supabase' : saveStatus === 'saving' ? 'Salvando no Supabase...' : storageError}
+        {saveStatus === 'error' && <button onClick={() => persistBoard({})} className="ml-3 underline">Tentar salvar novamente</button>}
+      </div>}
       {/* ========================================================================= */}
       {/* 1. BARRA SUPERIOR (HEADER ESTILO MIRO / EVOCRM)                           */}
       {/* ========================================================================= */}
-      <div className="h-14 px-4 bg-[#07100F] border-b border-[rgba(218,241,222,0.08)] flex items-center justify-between z-30 shrink-0">
+      <div ref={headerRef} className="min-h-14 px-4 py-2 gap-2 flex-wrap bg-[#07100F] border-b border-[rgba(218,241,222,0.08)] flex items-center justify-between z-30 shrink-0">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.1)] text-[#F1F9A1]">
             <Sparkles className="w-4 h-4" />
           </div>
           <div>
             <h1 className="text-sm font-heading font-semibold text-[#E7ECE8] flex items-center gap-2">
-              Quadro de Mensagens &amp; Funis
+              Rabisco
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#8EB69B]">
                 {cards.length} cards • {connections.length} conexões
               </span>
@@ -636,7 +723,7 @@ export default function MensagensQuadroPage() {
       {/* ========================================================================= */}
       {/* 2. BARRA LATERAL FLUTUANTE DE FERRAMENTAS (ESTILO MIRO)                    */}
       {/* ========================================================================= */}
-      <div className="absolute left-4 top-20 z-40 flex flex-col items-center bg-[#07100F]/95 backdrop-blur-md border border-[rgba(218,241,222,0.12)] p-2 rounded-2xl shadow-2xl gap-2">
+      <div style={{ top: headerHeight + 16 }} className="absolute left-4 z-40 flex flex-col items-center bg-[#07100F]/95 backdrop-blur-md border border-[rgba(218,241,222,0.12)] p-2 rounded-2xl shadow-2xl gap-2">
         {/* Ferramenta: Selecionar / Mover */}
         <button
           type="button"
@@ -753,7 +840,7 @@ export default function MensagensQuadroPage() {
 
       {/* Dica / Status da Ferramenta Ativa */}
       {tool === 'connect' && (
-        <div className="absolute top-16 left-20 z-40 bg-[#10201E] border border-[rgba(241,249,161,0.3)] text-[#F1F9A1] px-3.5 py-1.5 rounded-xl text-xs font-mono shadow-xl flex items-center gap-2 animate-in fade-in">
+        <div style={{ top: headerHeight + 8 }} className="absolute left-20 right-3 sm:right-auto z-40 bg-[#10201E] border border-[rgba(241,249,161,0.3)] text-[#F1F9A1] px-3.5 py-1.5 rounded-xl text-xs font-mono shadow-xl flex items-center gap-2 animate-in fade-in">
           <Link2 className="w-3.5 h-3.5 text-[#F1F9A1]" />
           <span>
             {connectingFromId
@@ -774,7 +861,7 @@ export default function MensagensQuadroPage() {
       )}
 
       {tool === 'pen' && (
-        <div className="absolute top-16 left-20 z-40 bg-[#10201E] border border-[rgba(142,182,155,0.3)] text-[#8EB69B] px-3.5 py-1.5 rounded-xl text-xs font-mono shadow-xl flex items-center gap-2 animate-in fade-in">
+        <div style={{ top: headerHeight + 8 }} className="absolute left-20 right-3 sm:right-auto z-40 bg-[#10201E] border border-[rgba(142,182,155,0.3)] text-[#8EB69B] px-3.5 py-1.5 rounded-xl text-xs font-mono shadow-xl flex items-center gap-2 animate-in fade-in">
           <PenTool className="w-3.5 h-3.5" />
           <span>Modo Rabisco Ativo: Desenhe livremente com o mouse ou toque.</span>
         </div>
@@ -793,11 +880,12 @@ export default function MensagensQuadroPage() {
       {/* ========================================================================= */}
       <div
         ref={containerRef}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onWheel={handleWheel}
-        className={`relative flex-1 w-full h-full overflow-hidden cursor-${
+        data-testid="rabisco-canvas"
+        onPointerDown={handleMouseDown}
+        onPointerMove={handleMouseMove}
+        onPointerUp={handleMouseUp}
+        onPointerCancel={handleMouseUp}
+        className={`relative flex-1 min-h-0 w-full overflow-hidden touch-none cursor-${
           tool === 'pen' ? 'crosshair' : tool === 'card' ? 'copy' : isPanning ? 'grabbing' : 'default'
         }`}
         style={{
@@ -962,7 +1050,8 @@ export default function MensagensQuadroPage() {
             return (
               <div
                 key={card.id}
-                onMouseDown={(e) => {
+                onPointerDown={(e) => {
+                  if ((e.target as HTMLElement).closest('input, textarea, button')) return;
                   if (tool === 'connect') {
                     handleCardConnectClick(card.id, e);
                     return;
@@ -981,6 +1070,7 @@ export default function MensagensQuadroPage() {
                   }
 
                   const pos = screenToCanvas(e.clientX, e.clientY);
+                  e.currentTarget.setPointerCapture(e.pointerId);
                   setDraggingCardId(card.id);
                   setDragOffset({ x: pos.x - card.x, y: pos.y - card.y });
                 }}
@@ -1000,6 +1090,7 @@ export default function MensagensQuadroPage() {
                 {/* Cabeçalho do Card com Título Editável e Ações */}
                 <div className="px-3.5 pt-3 pb-1 flex items-center justify-between gap-1 border-b border-black/10">
                   <input
+                    aria-label="Título do rabisco"
                     type="text"
                     value={card.title}
                     onChange={(e) => {
@@ -1051,6 +1142,7 @@ export default function MensagensQuadroPage() {
                 {/* Conteúdo / Texto Livre da Mensagem */}
                 <div className="p-3 flex-1 flex flex-col">
                   <textarea
+                    aria-label="Texto do rabisco"
                     value={card.content}
                     onChange={(e) => {
                       const newContent = e.target.value;

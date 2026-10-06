@@ -484,6 +484,7 @@ export class DatabaseService {
       const bySlug = stages.find(
         (s) =>
           (s.slug || '').toLowerCase() === norm ||
+          ((norm === 'follow_up' || norm === 'follow_up_1') && (s.slug === 'follow_up' || s.slug === 'follow_up_1')) ||
           (s.name || '').toLowerCase() === norm
       );
       if (bySlug) return bySlug.id;

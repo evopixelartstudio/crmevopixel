@@ -1,5 +1,8 @@
 'use client';
 
+import { deletePipelineOpportunities } from '@/lib/services/pipeline-deletion';
+import { ensureFollowUpStages } from '@/lib/services/pipeline-follow-up-stages';
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { getSupabase } from '@/lib/supabase/client';
 import { parseLeadFromSupabase, dbService } from '@/lib/supabase/db-service';
@@ -116,14 +119,12 @@ function generateWhatsAppProposalMessage(
       : (opp.delivery_days ?? 7);
 
   const paymentLink =
-    (overrideLink !== undefined ? overrideLink : opp.payment_link)?.trim() ||
-    'https://mpago.la/exemplo-evopixel';
+    (overrideLink !== undefined ? overrideLink : opp.payment_link)?.trim() || '';
 
   return `Fala, ${contactName}! Tudo bem?
 Conforme conversamos, o projeto de ${serviceName} está alinhado com prazo de entrega de ${deliveryDays} dias.
 
-Você pode realizar a entrada ou pagamento seguro por este link do Mercado Pago:
-${paymentLink}
+${paymentLink ? `Use este link para realizar a entrada ou pagamento:\n${paymentLink}` : 'Podemos combinar a forma de pagamento pelo WhatsApp.'}
 
 Assim que confirmar, já iniciamos o processo aqui na EvoPixel!`;
 }
@@ -198,6 +199,9 @@ function formatClosedDate(dateStr?: string | null) {
 }
 
 export default function PipelinePage() {
+  const [selectedOppIds, setSelectedOppIds] = useState<string[]>([]);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [bulkDeleteError, setBulkDeleteError] = useState<string | null>(null);
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [leadsList, setLeadsList] = useState<Lead[]>([]);
@@ -412,7 +416,7 @@ export default function PipelinePage() {
         throw new Error(`Erro ao buscar oportunidades: ${oppsRes.error.message}`);
       }
 
-      const loadedStages = (stagesRes.data || []) as PipelineStage[];
+      const loadedStages = await ensureFollowUpStages((stagesRes.data || []) as PipelineStage[]);
       setStages(loadedStages);
       setNewStageId((prev) => prev || (loadedStages[0]?.id ?? ''));
 
@@ -853,7 +857,7 @@ export default function PipelinePage() {
     }
   };
 
-  // Ação de Cópia Inteligente da Proposta Comercial com link Mercado Pago
+  // Ação de Cópia Inteligente da Proposta Comercial com link de pagamento
   const handleCopyProposal = async (
     opp: Opportunity,
     e?: React.MouseEvent,
@@ -1002,8 +1006,59 @@ export default function PipelinePage() {
     });
   }, [lostOpportunities, lostReasonFilter, lostSearchTerm]);
 
+  const visibleOpps = showLostView ? filteredLostOpps : activeOpportunities;
+  const selectedVisibleIds = visibleOpps.filter(opp => selectedOppIds.includes(opp.id)).map(opp => opp.id);
+  const allVisibleSelected = visibleOpps.length > 0 && selectedVisibleIds.length === visibleOpps.length;
+  const toggleOppSelection = (id: string) => {
+    setSelectedOppIds(previous => previous.includes(id) ? previous.filter(value => value !== id) : [...previous, id]);
+  };
+  const handleBulkDelete = async () => {
+    if (isBulkDeleting || selectedVisibleIds.length === 0) return;
+    if (!confirm(`Excluir ${selectedVisibleIds.length} oportunidades selecionadas? Esta exclusão é permanente. Os leads vinculados serão mantidos.`)) return;
+    setIsBulkDeleting(true);
+    setBulkDeleteError(null);
+    try {
+      const deletedIds = await deletePipelineOpportunities(selectedVisibleIds);
+      const deleted = new Set(deletedIds);
+      setOpportunities(previous => previous.filter(opp => !deleted.has(opp.id)));
+      crmService.setOpportunitiesFromSupabase(crmService.getOpportunities().filter(opp => !deleted.has(opp.id)));
+      deletedIds.forEach(removeLostMetadata);
+      setSelectedOppIds(previous => previous.filter(id => !deleted.has(id)));
+      if (editingOpp && deleted.has(editingOpp.id)) setEditingOpp(null);
+      if (deletedIds.length !== selectedVisibleIds.length) {
+        setBulkDeleteError('Algumas oportunidades não foram excluídas. Atualize o Pipeline e verifique suas permissões.');
+      }
+    } catch (error) {
+      setBulkDeleteError(error instanceof Error ? error.message : 'Não foi possível excluir as oportunidades. Tente novamente.');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+  const selectionCheckbox = (opp: Opportunity) => (
+    <input type="checkbox" checked={selectedOppIds.includes(opp.id)}
+      disabled={isBulkDeleting} aria-label={`Selecionar oportunidade ${opp.title}`}
+      onClick={event => event.stopPropagation()} onChange={() => toggleOppSelection(opp.id)}
+      className="h-4 w-4 shrink-0 accent-[#F1F9A1] cursor-pointer" />
+  );
+
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[rgba(218,241,222,0.08)] bg-[#10201E] px-4 py-3">
+        <label className="flex items-center gap-2 text-sm text-[#E7ECE8]">
+          <input type="checkbox" checked={allVisibleSelected} disabled={isBulkDeleting || visibleOpps.length === 0}
+            className="h-4 w-4 accent-[#F1F9A1]"
+            onChange={() => setSelectedOppIds(allVisibleSelected ? [] : visibleOpps.map(opp => opp.id))} />
+          Selecionar todas ({visibleOpps.length})
+        </label>
+        <span className="text-xs text-[#9BA6A0]" aria-live="polite">{selectedVisibleIds.length} selecionadas</span>
+        {selectedVisibleIds.length > 0 && <>
+          <Button variant="ghost" size="sm" disabled={isBulkDeleting} onClick={() => setSelectedOppIds([])}>Limpar seleção</Button>
+          <Button variant="destructive" size="sm" disabled={isBulkDeleting} onClick={handleBulkDelete}>
+            <Trash2 className="w-4 h-4" />{isBulkDeleting ? 'Excluindo...' : `Excluir selecionadas (${selectedVisibleIds.length})`}
+          </Button>
+        </>}
+        {bulkDeleteError && <p role="alert" className="w-full text-sm text-red-400">{bulkDeleteError}</p>}
+      </div>
       {/* Cabeçalho */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[rgba(218,241,222,0.06)] pb-5">
         <div>
@@ -1219,7 +1274,7 @@ export default function PipelinePage() {
                             return (
                               <div
                                 key={opp.id}
-                                draggable
+                                draggable={!isBulkDeleting && !selectedOppIds.includes(opp.id)}
                                 onDragStart={(e) => {
                                   e.dataTransfer.setData('text/plain', opp.id);
                                 }}
@@ -1227,6 +1282,7 @@ export default function PipelinePage() {
                               >
                                 <div>
                                   <div className="flex items-start justify-between gap-1.5 mb-1">
+                                    {selectionCheckbox(opp)}
                                     <span className="text-xs font-semibold text-[#E7ECE8] font-heading leading-snug">
                                       {opp.title}
                                     </span>
@@ -1410,7 +1466,7 @@ export default function PipelinePage() {
             </div>
           )}
 
-          {/* MODO LISTA: Oportunidades Ativas com Proposta Mercado Pago & WhatsApp */}
+          {/* MODO LISTA: Oportunidades Ativas com Proposta comercial & WhatsApp */}
           {viewMode === 'lista' && (
             <div className="bg-[#0C1A19]/80 border border-[rgba(218,241,222,0.08)] rounded-2xl overflow-hidden shadow-sm">
               {activeOpportunities.length === 0 ? (
@@ -1428,7 +1484,7 @@ export default function PipelinePage() {
                         <th className="py-3.5 px-4">Oportunidade / Lead</th>
                         <th className="py-3.5 px-4">Etapa</th>
                         <th className="py-3.5 px-4">Valor Estimado</th>
-                        <th className="py-3.5 px-4">Link de Pagamento (Mercado Pago)</th>
+                        <th className="py-3.5 px-4">Link de Pagamento</th>
                         <th className="py-3.5 px-4 text-center">Proposta WhatsApp</th>
                         <th className="py-3.5 px-4 text-right">Ações</th>
                       </tr>
@@ -1441,6 +1497,7 @@ export default function PipelinePage() {
                         return (
                           <tr key={opp.id} className="hover:bg-[#10201E]/70 transition-colors">
                             <td className="py-3.5 px-4">
+                              {selectionCheckbox(opp)}
                               <div className="font-semibold text-[#E7ECE8] font-heading text-sm">
                                 {opp.title}
                               </div>
@@ -1631,6 +1688,7 @@ export default function PipelinePage() {
                           className="hover:bg-[#161B22]/50 transition-colors group"
                         >
                           <td className="py-3.5 px-4">
+                            {selectionCheckbox(opp)}
                             <div className="font-semibold text-[#E6EDF3] font-heading text-sm">
                               {opp.title}
                             </div>
@@ -1901,11 +1959,11 @@ export default function PipelinePage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="sm:col-span-2">
               <label className="block text-[#9BA6A0] mb-1 font-medium">
-                Link de Pagamento (Mercado Pago) - Opcional
+                Link de Pagamento - Opcional
               </label>
               <input
                 type="url"
-                placeholder="https://mpago.la/..."
+                placeholder="Cole o link de pagamento, se houver"
                 value={newPaymentLink}
                 onChange={(e) => setNewPaymentLink(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
@@ -2093,25 +2151,25 @@ export default function PipelinePage() {
             </div>
           )}
 
-          {/* Seção de Fechamento de Proposta & Link Mercado Pago */}
+          {/* Seção de Fechamento de Proposta & Link de pagamento */}
           <div className="pt-3 border-t border-[rgba(218,241,222,0.08)] space-y-3">
             <div className="flex items-center gap-2">
               <CreditCard className="w-4 h-4 text-[#F1F9A1]" />
               <span className="text-xs font-semibold text-[#E7ECE8] font-heading">
-                Fechamento & Proposta via WhatsApp (Mercado Pago)
+                Fechamento & Proposta via WhatsApp
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="sm:col-span-2">
                 <label className="block text-[#9BA6A0] mb-1 font-medium">
-                  Link de Pagamento (Mercado Pago)
+                  Link de Pagamento
                 </label>
                 <div className="relative">
                   <Link2 className="w-3.5 h-3.5 text-[#8B949E] absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="url"
-                    placeholder="https://mpago.la/... ou link do checkout"
+                    placeholder="Cole o link de pagamento, se houver"
                     value={editPaymentLink}
                     onChange={(e) => setEditPaymentLink(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"

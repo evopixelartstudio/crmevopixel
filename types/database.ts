@@ -77,6 +77,8 @@ export interface MessageLog {
 
 export interface Lead {
   id: string;
+  company_id?: string;
+  source_id?: string;
   name: string;
   company_name: string;
   role?: string;
@@ -86,12 +88,13 @@ export interface Lead {
   phone?: string;
   whatsapp?: string;
   instagram?: string;
+  google_business?: string;
   website?: string;
   city: string;
   state: string;
   score: number;
   temperature: Temperature;
-  status: 'novo' | 'em_abordagem' | 'em_conversa' | 'qualificado' | 'desqualificado' | 'convertido';
+  status: 'novo' | 'em_abordagem' | 'em_contato' | 'em_conversa' | 'qualificado' | 'desqualificado' | 'convertido';
   services: string[]; // Serviços identificados
   last_contact_at?: string;
   next_action?: string;

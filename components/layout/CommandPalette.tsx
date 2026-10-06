@@ -387,7 +387,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
               {filteredLeads.length === 0 &&
                 filteredClients.length === 0 &&
                 filteredProspects.length === 0 &&
-                filteredProposals.length === 0 &&
+                filteredOpportunities.length === 0 &&
                 filteredServices.length === 0 && (
                   <div className="p-8 text-center text-xs text-[#65706A]">
                     Nenhum resultado encontrado para &quot;{query}&quot;. Tente uma pergunta (&quot;Como está nossa conversão?&quot;) ou ação (&quot;João pagou 2 mil&quot;).

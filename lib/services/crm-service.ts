@@ -623,10 +623,6 @@ class CrmService {
   }
 
   // Sequências & Nichos (Seção 18.1 & 18.2)
-  public getNiches(): Niche[] {
-    return this.niches;
-  }
-
   public getSequences(): MessageSequence[] {
     return this.sequences;
   }
@@ -1853,8 +1849,8 @@ class CrmService {
     proj.amount_pending = 0;
 
     const metaTag = `[GATEWAY:${settlement.payment_method}|GROSS:${settlement.gross_amount}|FEE:${settlement.fee_amount}|NET:${settlement.net_amount}|DATE:${pDate}]`;
-    const cleanDesc = (proj.description || '').replace(/\[GATEWAY:[^\]]+\]/g, '').trim();
-    proj.description = cleanDesc ? `${cleanDesc} ${metaTag}` : metaTag;
+    const cleanDesc = (proj.notes || '').replace(/\[GATEWAY:[^\]]+\]/g, '').trim();
+    proj.notes = cleanDesc ? `${cleanDesc} ${metaTag}` : metaTag;
 
     this.saveToLocalStorage('historical_projects', this.historicalProjects);
     dbService.updateHistoricalProject(id, proj);
@@ -1862,14 +1858,14 @@ class CrmService {
 
     if (settlement.auto_create_expense && settlement.fee_amount > 0) {
       this.addMonthlyExpense({
-        title: `Taxa Gateway (${settlement.payment_method}) — ${proj.project_name || proj.company_name}`,
+        title: `Taxa Gateway (${settlement.payment_method}) — ${proj.company_name}`,
         category: 'Taxas Bancárias / Gateway (Mercado Pago)',
         amount: settlement.fee_amount,
         due_day: new Date(pDate).getDate() || 10,
         due_date: pDate,
         recurring: false,
         status: 'pago',
-        notes: `Retenção automática de gateway na liquidação do projeto ${proj.project_name || proj.company_name}. Bruto: R$ ${settlement.gross_amount}, Líquido: R$ ${settlement.net_amount}.`,
+        notes: `Retenção automática de gateway na liquidação do projeto ${proj.company_name}. Bruto: R$ ${settlement.gross_amount}, Líquido: R$ ${settlement.net_amount}.`,
       });
     }
 

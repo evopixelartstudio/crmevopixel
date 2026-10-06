@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import * as xlsx from 'xlsx';
 import { crmService } from '@/lib/services/crm-service';
+import { parseSpreadsheetLeads } from '@/lib/services/spreadsheet-leads';
 import { useCrmSync } from '@/lib/hooks/useCrmSync';
 import { Lead, Temperature } from '@/types/database';
 import { Button } from '@/components/ui/Button';
@@ -89,36 +90,11 @@ export default function LeadsPage() {
         const workbook = xlsx.read(data, { type: 'binary' });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
-        const jsonData = xlsx.utils.sheet_to_json(worksheet);
-
-        const leadsParaSalvar: Omit<Lead, 'id'>[] = [];
-        jsonData.forEach((row: any) => {
-          const name = row['Nome'] || row['Name'] || row['nome'] || row['Contato'] || '';
-          const company = row['Empresa'] || row['Company'] || row['empresa'] || row['Organização'] || name || 'Sem Empresa';
-          const phone = row['Telefone'] || row['WhatsApp'] || row['telefone'] || row['Phone'] || row['Celular'] || row['whatsapp'] || '';
-          const segment = row['Nicho'] || row['Segmento'] || row['nicho'] || row['segmento'] || 'Geral';
-          const email = row['Email'] || row['E-mail'] || row['email'] || '';
-          const city = row['Cidade'] || row['City'] || row['cidade'] || 'São Paulo';
-          const role = row['Cargo'] || row['Função'] || row['role'] || 'Decisor Comercial';
-          const instagram = row['Instagram'] || row['instagram'] || row['Insta'] || '';
-          const google_business = row['Google Meu Negócio'] || row['GMB'] || row['Google Maps'] || row['google_business'] || '';
-
-          if (company || name || phone) {
-            const qualified = qualifyLeadWithAI({
-              name,
-              company_name: company,
-              phone,
-              whatsapp: phone,
-              segment,
-              city,
-              email,
-              role,
-              instagram,
-              google_business,
-            });
-            leadsParaSalvar.push(qualified);
-          }
-        });
+        const jsonData = xlsx.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '', raw: false });
+        const leadsParaSalvar = parseSpreadsheetLeads(jsonData);
+        if (leadsParaSalvar.length === 0) {
+          throw new Error('Nenhum contato reconhecido. Use colunas como Nome, Empresa, Telefone, WhatsApp ou Email.');
+        }
 
         await crmService.addLeads(leadsParaSalvar);
         setImportStats({ total: jsonData.length, count: leadsParaSalvar.length });
@@ -313,8 +289,7 @@ export default function LeadsPage() {
     const opps = crmService.getOpportunities();
     const existing = opps.find(
       (o) =>
-        o.lead_id === lead.id ||
-        (o.company_name || '').trim().toLowerCase() === (lead.company_name || '').trim().toLowerCase()
+        o.lead_id === lead.id
     );
     if (existing) {
       if (lead.status !== 'em_contato' && lead.status !== 'convertido') {
@@ -398,8 +373,7 @@ export default function LeadsPage() {
       lead.status === 'convertido' ||
       opportunities.some(
         (o) =>
-          o.lead_id === lead.id ||
-          (o.company_name || '').trim().toLowerCase() === (lead.company_name || '').trim().toLowerCase()
+          o.lead_id === lead.id
       );
     if (isAlreadyInPipeline) return false;
 
