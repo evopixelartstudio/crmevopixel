@@ -323,16 +323,10 @@ class CrmService {
         this.saveToLocalStorage('monthly_clients', this.monthlyClients);
         changed = true;
       }
-      const hasLocalLeads =
-        typeof window !== 'undefined' && localStorage.getItem('evocrm_leads') !== null;
-      if (!hasLocalLeads && leads && leads.length > 0) { 
-        const supabaseIds = new Set(leads.map(l => l.id));
-        const localUnsynced = this.leads.filter(l => !supabaseIds.has(l.id));
-        this.leads = [...leads, ...localUnsynced];
+      if (leads !== null) {
+        this.leads = leads;
         this.saveToLocalStorage('leads', this.leads);
-        changed = true; 
-      } else if (!hasLocalLeads && this.leads.length > 0) {
-        this.leads.forEach(l => dbService.insertLead(l));
+        changed = true;
       }
       if (prospects && prospects.length > 0) { this.prospects = prospects; changed = true; }
       if (opps !== null) {
@@ -583,6 +577,34 @@ class CrmService {
     });
 
     return newLead;
+  }
+
+  public async addLeads(leadsData: Omit<Lead, 'id'>[]): Promise<void> {
+    if (leadsData.length === 0) return;
+
+    const newLeads: Lead[] = leadsData.map((leadData, index) => ({
+      ...leadData,
+      id:
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `lead-${Date.now()}-${index}`,
+    }));
+    this.leads.unshift(...newLeads);
+    this.saveToLocalStorage('leads', this.leads);
+    this.notify();
+
+    const insertedLeads = await Promise.all(newLeads.map(l => dbService.insertLead(l)));
+    let idsChanged = false;
+    insertedLeads.forEach((inserted, index) => {
+      if (inserted && inserted.id && inserted.id !== newLeads[index].id) {
+        newLeads[index].id = inserted.id;
+        idsChanged = true;
+      }
+    });
+    if (idsChanged) {
+      this.saveToLocalStorage('leads', this.leads);
+      this.notify();
+    }
   }
 
   public deleteLead(id: string): void {

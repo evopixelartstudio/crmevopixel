@@ -83,7 +83,7 @@ export default function LeadsPage() {
 
     setIsImporting(true);
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const data = evt.target?.result;
         const workbook = xlsx.read(data, { type: 'binary' });
@@ -91,7 +91,7 @@ export default function LeadsPage() {
         const worksheet = workbook.Sheets[firstSheetName];
         const jsonData = xlsx.utils.sheet_to_json(worksheet);
 
-        let count = 0;
+        const leadsParaSalvar: Omit<Lead, 'id'>[] = [];
         jsonData.forEach((row: any) => {
           const name = row['Nome'] || row['Name'] || row['nome'] || row['Contato'] || '';
           const company = row['Empresa'] || row['Company'] || row['empresa'] || row['Organização'] || name || 'Sem Empresa';
@@ -116,12 +116,12 @@ export default function LeadsPage() {
               instagram,
               google_business,
             });
-            crmService.addLead(qualified);
-            count++;
+            leadsParaSalvar.push(qualified);
           }
         });
 
-        setImportStats({ total: jsonData.length, count });
+        await crmService.addLeads(leadsParaSalvar);
+        setImportStats({ total: jsonData.length, count: leadsParaSalvar.length });
       } catch (err) {
         console.error(err);
         alert('Erro ao processar a planilha. Certifique-se de que é um arquivo CSV ou XLSX válido.');
