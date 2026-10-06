@@ -373,10 +373,10 @@ export default function LeadsPage() {
     const isAlreadyInPipeline =
       lead.status === 'em_contato' ||
       lead.status === 'convertido' ||
-      opportunities.some(
+      (lead.status !== 'novo' && opportunities.some(
         (o) =>
           o.lead_id === lead.id
-      );
+      ));
     if (isAlreadyInPipeline) return false;
 
     const matchesSearch =

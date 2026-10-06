@@ -3,6 +3,10 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 function getInitialConfig() {
   const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   const envKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  // Configuração publicada é compartilhada por todos os dispositivos.
+  if (envUrl && envKey && !envUrl.includes('placeholder') && !envUrl.includes('seu-projeto')) {
+    return { url: envUrl, key: envKey };
+  }
 
   if (typeof window !== 'undefined') {
     const localUrl = localStorage.getItem('evocrm_supabase_url');

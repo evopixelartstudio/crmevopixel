@@ -19,10 +19,11 @@ require.extensions['.ts'] = (module, filename) => module._compile(
 const inserted = [];
 const updates = [];
 let remoteLeads = [];
+let failLeadInsert = false;
 const dbService = new Proxy({}, {
   get: (_, key) => async (...args) => {
     if (key === 'getLeads') return remoteLeads;
-    if (key === 'insertLead') { inserted.push(args[0]); return args[0]; }
+    if (key === 'insertLead') { inserted.push(args[0]); return failLeadInsert ? null : args[0]; }
     if (key === 'updateHistoricalProject') { updates.push(args); return true; }
     return null;
   },
@@ -104,4 +105,28 @@ test('historical settlement persists gateway metadata in notes and creates the f
   assert.match(result.notes, /\[GATEWAY:pix\|GROSS:100\|FEE:5\|NET:95\|DATE:2026-10-06\]/);
   assert.equal(updates.at(-1)[0], project.id);
   assert.equal(crmService.getMonthlyExpenses()[0].amount, 5);
+});
+
+test('failed Supabase import rejects and does not publish unpersisted leads', async () => {
+  const before = [...crmService.getLeads()];
+  failLeadInsert = true;
+  try {
+    await assert.rejects(crmService.addLeads(parseSpreadsheetLeads([{ Empresa: 'Failed import' }])), /0 de 1 leads salvos/);
+    assert.deepEqual(crmService.getLeads(), before);
+  } finally {
+    failLeadInsert = false;
+  }
+});
+
+test('a stale Supabase load cannot erase an import confirmed after the load started', async () => {
+  let resolveLoad;
+  remoteLeads = new Promise(resolve => { resolveLoad = resolve; });
+  const loading = crmService.initFromSupabase(true);
+  await crmService.addLeads(parseSpreadsheetLeads([{ Empresa: 'Confirmed during loading' }]));
+  resolveLoad([]);
+  await loading;
+  assert.ok(crmService.getLeads().some(lead => lead.company_name === 'Confirmed during loading'));
+  remoteLeads = [...crmService.getLeads()];
+  await crmService.initFromSupabase(true);
+  assert.ok(crmService.getLeads().some(lead => lead.company_name === 'Confirmed during loading'));
 });

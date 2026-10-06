@@ -86,6 +86,7 @@ class CrmService {
   private aiActionLogs: AIActionLog[] = [...INITIAL_AI_ACTION_LOGS];
   private aiFeedbacks: AIFeedback[] = [];
   private initializedFromSupabase = false;
+  private leadRevision = 0;
   private listeners: Set<() => void> = new Set();
 
   constructor() {
@@ -231,6 +232,7 @@ class CrmService {
 
   public async initFromSupabase(force = false): Promise<void> {
     if (this.initializedFromSupabase && !force) return;
+    const leadRevisionAtStart = this.leadRevision;
     try {
       const [
         clients,
@@ -323,7 +325,7 @@ class CrmService {
         this.saveToLocalStorage('monthly_clients', this.monthlyClients);
         changed = true;
       }
-      if (leads !== null) {
+      if (leads !== null && leadRevisionAtStart === this.leadRevision) {
         this.leads = leads;
         this.saveToLocalStorage('leads', this.leads);
         changed = true;
@@ -581,6 +583,7 @@ class CrmService {
 
   public async addLeads(leadsData: Omit<Lead, 'id'>[]): Promise<void> {
     if (leadsData.length === 0) return;
+    this.leadRevision++;
 
     const newLeads: Lead[] = leadsData.map((leadData, index) => ({
       ...leadData,
@@ -589,21 +592,17 @@ class CrmService {
           ? crypto.randomUUID()
           : `lead-${Date.now()}-${index}`,
     }));
-    this.leads.unshift(...newLeads);
-    this.saveToLocalStorage('leads', this.leads);
-    this.notify();
-
     const insertedLeads = await Promise.all(newLeads.map(l => dbService.insertLead(l)));
-    let idsChanged = false;
-    insertedLeads.forEach((inserted, index) => {
-      if (inserted && inserted.id && inserted.id !== newLeads[index].id) {
-        newLeads[index].id = inserted.id;
-        idsChanged = true;
-      }
-    });
-    if (idsChanged) {
+    const confirmedLeads = insertedLeads.filter((lead): lead is Lead => lead !== null);
+    this.leadRevision++;
+    if (confirmedLeads.length > 0) {
+      const confirmedIds = new Set(confirmedLeads.map(lead => lead.id));
+      this.leads = [...confirmedLeads, ...this.leads.filter(lead => !confirmedIds.has(lead.id))];
       this.saveToLocalStorage('leads', this.leads);
       this.notify();
+    }
+    if (confirmedLeads.length !== newLeads.length) {
+      throw new Error(`${confirmedLeads.length} de ${newLeads.length} leads salvos no Supabase. A importação não foi concluída. Verifique a conexão e as permissões do banco antes de tentar novamente.`);
     }
   }
 
