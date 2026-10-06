@@ -92,7 +92,7 @@ export function qualifyLeadWithAI(input: QualifyInput): Omit<Lead, 'id'> {
     instagram: input.instagram || '',
     google_business: input.google_business || '',
     phone: formattedPhone,
-    whatsapp: formattedPhone,
+    whatsapp: cleanedPhone || rawPhone,
     score: score,
     temperature: temperature,
     status: 'novo',

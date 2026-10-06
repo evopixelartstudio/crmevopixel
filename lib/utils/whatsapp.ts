@@ -4,7 +4,17 @@
 
 export function cleanPhoneNumber(phone?: string): string {
   if (!phone) return '';
-  return phone.replace(/\D/g, '');
+  const value = String(phone).trim();
+  if (/^(?:https?:\/\/)?(?:www\.)?(?:wa\.me|api\.whatsapp\.com|web\.whatsapp\.com)\//i.test(value)) {
+    try {
+      const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
+      const number = url.hostname.replace(/^www\./, '') === 'wa.me'
+        ? url.pathname.slice(1).split('/')[0]
+        : url.searchParams.get('phone') || '';
+      return number.replace(/\D/g, '');
+    } catch { return ''; }
+  }
+  return value.replace(/\D/g, '');
 }
 
 export function formatWhatsAppNumber(phone?: string): string {

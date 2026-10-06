@@ -318,13 +318,14 @@ export default function LeadsPage() {
   };
 
   const handleDirectWhatsApp = (lead: Lead) => {
-    if (!lead.whatsapp || !cleanPhoneNumber(lead.whatsapp)) {
+    const phone = cleanPhoneNumber(lead.whatsapp) || cleanPhoneNumber(lead.phone);
+    if (!phone) {
       alert(`O lead "${lead.company_name}" não possui número de WhatsApp válido cadastrado.`);
       return;
     }
     // Ao iniciar o primeiro contato via WhatsApp, move automaticamente para o Pipeline e sai da lista de Leads
     addToPipeline(lead, 'Primeiro Contato via WhatsApp');
-    openWhatsApp(lead.whatsapp);
+    openWhatsApp(phone);
   };
 
   const handleAddToPipeline = (lead: Lead, e?: React.MouseEvent) => {

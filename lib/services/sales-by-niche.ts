@@ -1,7 +1,7 @@
 import type { HistoricalProject, Project, Opportunity, Lead, Client } from '@/types/database';
 
 export type SalesPeriod = 'hoje' | '7d' | '30d' | '90d' | 'ano' | 'historico';
-export interface NicheSales { niche: string; count: number; percentage: number }
+export interface NicheSales { niche: string; count: number; percentage: number; customers: { company: string; clientId?: string; count: number }[] }
 
 export function getSalesByNiche(
   historical: HistoricalProject[], projects: Project[], opportunities: Opportunity[],
@@ -26,7 +26,7 @@ export function getSalesByNiche(
     sales.push({ company: opp.company_name, segment: opp.leads?.segment || leads.find(lead => lead.id === opp.lead_id)?.segment,
       date: opp.closed_at || opp.updated_at, amount: opp.estimated_value || 0 });
   });
-  const groups = new Map<string, { niche: string; count: number }>();
+  const groups = new Map<string, { niche: string; count: number; customers: NicheSales['customers'] }>();
   for (const sale of sales) {
     if (period !== 'historico') {
       if (!sale.date) continue;
@@ -43,11 +43,15 @@ export function getSalesByNiche(
     }
     const niche = sale.segment?.trim() || clients.find(client => normalize(client.company_name) === normalize(sale.company))?.segment?.trim() || 'Nicho não informado';
     const key = normalize(niche);
-    const group = groups.get(key) || { niche, count: 0 };
+    const group = groups.get(key) || { niche, count: 0, customers: [] };
     group.count++;
+    const company = sale.company?.trim() || 'Cliente não informado';
+    const customer = group.customers.find(customer => normalize(customer.company) === normalize(company));
+    if (customer) customer.count++;
+    else group.customers.push({ company, count: 1, clientId: clients.find(client => normalize(client.company_name) === normalize(company))?.id });
     groups.set(key, group);
   }
   const total = [...groups.values()].reduce((sum, group) => sum + group.count, 0);
   return [...groups.values()].sort((a, b) => b.count - a.count || a.niche.localeCompare(b.niche, 'pt-BR'))
-    .map(group => ({ ...group, percentage: group.count / total * 100 }));
+    .map(group => ({ ...group, customers: group.customers.sort((a, b) => b.count - a.count || a.company.localeCompare(b.company, 'pt-BR')), percentage: group.count / total * 100 }));
 }

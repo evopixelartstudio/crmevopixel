@@ -1,5 +1,6 @@
 import { getSupabase, isSupabaseConfigured } from './client';
-import { recoverSpreadsheetBusinessName } from '@/lib/services/spreadsheet-leads';
+import { recoverSpreadsheetBusinessName, recoverSpreadsheetWhatsApp } from '@/lib/services/spreadsheet-leads';
+import { cleanPhoneNumber } from '@/lib/utils/whatsapp';
 import {
   Lead,
   Client,
@@ -86,12 +87,17 @@ export function parseLeadFromSupabase(row: any): Lead {
   }
 
   const recoveredCompany = recoverSpreadsheetBusinessName(notes);
+  const recoveredWhatsApp = cleanPhoneNumber(recoverSpreadsheetWhatsApp(notes));
+  const storedWhatsApp = cleanPhoneNumber(row.whatsapp) || cleanPhoneNumber(row.phone);
+  const wasTruncated = recoveredWhatsApp.length > 11 && storedWhatsApp === recoveredWhatsApp.slice(0, 11);
   const repairCompany = recoveredCompany && (!row.company_name || row.company_name === 'Empresa não informada' || row.company_name === 'Sem Empresa');
   const repairName = repairCompany && (!row.name || /^Contato importado \d+$/.test(row.name) || row.name === 'Decisor');
   return {
     ...row,
     company_name: repairCompany ? recoveredCompany : row.company_name,
     name: repairName ? recoveredCompany : row.name,
+    whatsapp: wasTruncated ? recoveredWhatsApp : storedWhatsApp || recoveredWhatsApp,
+    phone: wasTruncated ? recoveredWhatsApp : cleanPhoneNumber(row.phone) || recoveredWhatsApp,
     notes,
     google_business,
     services,

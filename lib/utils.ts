@@ -7,7 +7,9 @@ export function cn(...inputs: ClassValue[]) {
 
 export function formatPhoneNumber(val: string): string {
   if (!val) return '';
-  const cleaned = val.replace(/\D/g, '').slice(0, 11);
+  const digits = val.replace(/\D/g, '');
+  const cleaned = digits.startsWith('55') && (digits.length === 12 || digits.length === 13) ? digits.slice(2) : digits;
+  if (cleaned.length > 11) return val;
   if (cleaned.length === 0) return '';
   if (cleaned.length <= 2) return `(${cleaned}`;
   if (cleaned.length <= 6) return `(${cleaned.slice(0, 2)}) ${cleaned.slice(2)}`;

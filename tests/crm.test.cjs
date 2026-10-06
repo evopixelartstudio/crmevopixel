@@ -31,7 +31,24 @@ const dbService = new Proxy({}, {
 const dbPath = require.resolve('../lib/supabase/db-service.ts');
 require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { dbService } };
 const { crmService } = require('../lib/services/crm-service.ts');
-const { parseSpreadsheetLeads, recoverSpreadsheetBusinessName } = require('../lib/services/spreadsheet-leads.ts');
+const { parseSpreadsheetLeads, recoverSpreadsheetBusinessName, recoverSpreadsheetWhatsApp } = require('../lib/services/spreadsheet-leads.ts');
+const { cleanPhoneNumber, getWhatsAppUrl } = require('../lib/utils/whatsapp.ts');
+
+test('spreadsheet WhatsApp / telefone header imports wa.me links and recovers existing notes', () => {
+  const sheet = xlsx.utils.aoa_to_sheet([
+    ['Nome do negócio', 'WhatsApp / telefone'],
+    ['#1Lavanderiajipa', 'https://wa.me/5569993547674'],
+    ['Alemão Diesel', 'https://wa.me/556933211509'],
+  ]);
+  const leads = parseSpreadsheetLeads(xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false }));
+  assert.equal(getWhatsAppUrl(leads[0].whatsapp), 'https://wa.me/5569993547674');
+  assert.equal(getWhatsAppUrl(leads[1].whatsapp), 'https://wa.me/556933211509');
+  const recovered = recoverSpreadsheetWhatsApp('Dados originais da planilha:\nWhatsApp / telefone: https://wa.me/5569993547674');
+  assert.equal(getWhatsAppUrl(recovered), 'https://wa.me/5569993547674');
+  assert.equal(cleanPhoneNumber('https://wa.me/5569993547674?text=Oferta%2050'), '5569993547674');
+  assert.equal(cleanPhoneNumber('https://api.whatsapp.com/send?phone=5569993547674&text=123'), '5569993547674');
+  assert.equal(getWhatsAppUrl('(69) 99354-7674'), 'https://wa.me/5569993547674');
+});
 const { getSalesByNiche } = require('../lib/services/sales-by-niche.ts');
 
 test('sales pie counts sold niches only, excludes canceled/open records and deduplicates mirrored sales', () => {
@@ -51,6 +68,8 @@ test('sales pie counts sold niches only, excludes canceled/open records and dedu
   ];
   const result = getSalesByNiche(historical, projects, opportunities, [], []);
   assert.deepEqual(result.map(item => [item.niche, item.count]), [['Advocacia', 2], ['Odonto', 1]]);
+  assert.deepEqual(result[0].customers.map(customer => customer.company), ['Alfa', 'Beta']);
+  assert.deepEqual(result[1].customers.map(customer => customer.company), ['Gamma']);
   assert.ok(Math.abs(result.reduce((sum, item) => sum + item.percentage, 0) - 100) < 0.001);
   assert.deepEqual(getSalesByNiche(historical, projects, opportunities, [], [], 'hoje', new Date('2026-10-07T12:00:00')), []);
   assert.deepEqual(getSalesByNiche([], [], [], [], []), []);
