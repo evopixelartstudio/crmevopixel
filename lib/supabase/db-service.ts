@@ -1,4 +1,5 @@
 import { getSupabase, isSupabaseConfigured } from './client';
+import { recoverSpreadsheetBusinessName } from '@/lib/services/spreadsheet-leads';
 import {
   Lead,
   Client,
@@ -84,8 +85,13 @@ export function parseLeadFromSupabase(row: any): Lead {
     }
   }
 
+  const recoveredCompany = recoverSpreadsheetBusinessName(notes);
+  const repairCompany = recoveredCompany && (!row.company_name || row.company_name === 'Empresa não informada' || row.company_name === 'Sem Empresa');
+  const repairName = repairCompany && (!row.name || /^Contato importado \d+$/.test(row.name) || row.name === 'Decisor');
   return {
     ...row,
+    company_name: repairCompany ? recoveredCompany : row.company_name,
+    name: repairName ? recoveredCompany : row.name,
     notes,
     google_business,
     services,

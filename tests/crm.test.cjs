@@ -31,7 +31,7 @@ const dbService = new Proxy({}, {
 const dbPath = require.resolve('../lib/supabase/db-service.ts');
 require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { dbService } };
 const { crmService } = require('../lib/services/crm-service.ts');
-const { parseSpreadsheetLeads } = require('../lib/services/spreadsheet-leads.ts');
+const { parseSpreadsheetLeads, recoverSpreadsheetBusinessName } = require('../lib/services/spreadsheet-leads.ts');
 
 test('proposal uses the supplied payment link and never invents a Mercado Pago link', () => {
   const filename = path.resolve(__dirname, '../app/(dashboard)/pipeline/page.tsx');
@@ -71,6 +71,17 @@ test('XLSX accepts incomplete leads and unknown columns, preserves data and skip
   assert.match(incomplete[2].notes, /Ligar depois/);
   assert.equal(incomplete[3].email, 'contato@example.com');
   incomplete.forEach(lead => assert.equal(lead.status, 'novo'));
+});
+
+test('spreadsheet business-name header maps to company and contact, including accents and whitespace', () => {
+  const names = ['#1Lavanderiajipa', '24 Horas Lavanderia Self-Service Express - FEB Várzea Grande', 'Alemão Diesel', 'Aline Macedo Beauty'];
+  const sheet = xlsx.utils.aoa_to_sheet([['Nome do negócio'], ...names.map(name => [name])]);
+  const leads = parseSpreadsheetLeads(xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false }));
+  assert.deepEqual(leads.map(lead => lead.company_name), names);
+  assert.deepEqual(leads.map(lead => lead.name), names);
+  assert.equal(parseSpreadsheetLeads([{ ' NOME DO NEGOCIO ': 'Baiano Auto Center' }])[0].company_name, 'Baiano Auto Center');
+  assert.equal(recoverSpreadsheetBusinessName('Dados originais da planilha:\nNome do negócio: Alemão Diesel'), 'Alemão Diesel');
+  assert.equal(recoverSpreadsheetBusinessName('Anotação comum: manter empresa atual'), undefined);
 });
 
 test('batch inserts leads without creating opportunities; remote empty list clears local state', async () => {

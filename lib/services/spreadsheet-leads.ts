@@ -5,6 +5,20 @@ const normalizeHeader = (value: string): string => value
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 
+export function recoverSpreadsheetBusinessName(notes: string): string | undefined {
+  const marker = 'Dados originais da planilha:';
+  const start = notes.indexOf(marker);
+  if (start < 0) return undefined;
+  for (const line of notes.slice(start + marker.length).split('\n')) {
+    const separator = line.indexOf(':');
+    if (separator < 0) continue;
+    if (normalizeHeader(line.slice(0, separator)) === 'nomedonegocio') {
+      return line.slice(separator + 1).trim() || undefined;
+    }
+  }
+  return undefined;
+}
+
 export function parseSpreadsheetLeads(rows: Record<string, unknown>[]): Omit<Lead, 'id'>[] {
   const leads: Omit<Lead, 'id'>[] = [];
   for (const [index, row] of rows.entries()) {
@@ -20,7 +34,7 @@ export function parseSpreadsheetLeads(rows: Record<string, unknown>[]): Omit<Lea
       return '';
     };
     const name = read('nome', 'name', 'contato', 'nome do contato', 'nome completo', 'contact name', 'full name');
-    const company = read('empresa', 'company', 'company name', 'company_name', 'nome da empresa', 'nome empresa', 'organização', 'razão social', 'nome fantasia', 'title', 'business name');
+    const company = read('empresa', 'company', 'company name', 'company_name', 'nome da empresa', 'nome empresa', 'nome do negócio', 'nome de negócio', 'nome negócio', 'negócio', 'nome do estabelecimento', 'estabelecimento', 'organização', 'razão social', 'nome fantasia', 'title', 'business name');
     const phone = read('telefone', 'phone', 'phone number', 'telefone comercial', 'celular', 'tel');
     const whatsapp = read('whatsapp', 'whats', 'numero whatsapp', 'whatsapp number') || phone;
     const email = read('email', 'e-mail', 'email address', 'correio eletrônico');
