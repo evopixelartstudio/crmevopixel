@@ -48,7 +48,7 @@ test('proposal uses the supplied payment link and never invents a Mercado Pago l
   assert.match(withLink, /10 dias/);
 });
 
-test('XLSX recognizes headers, numeric phones and contact fields; skips unknown rows', () => {
+test('XLSX accepts incomplete leads and unknown columns, preserves data and skips empty rows', () => {
   const sheet = xlsx.utils.aoa_to_sheet([
     [' NOME DA EMPRESA ', 'TELEFONE', 'E-MAIL', 'SITE', 'CIDADE', 'UF'],
     ['Alfa', 11999999999, 'alfa@example.com', 'https://alfa.example', 'Rio Branco', 'AC'],
@@ -63,7 +63,13 @@ test('XLSX recognizes headers, numeric phones and contact fields; skips unknown 
   assert.equal(leads[0].state, 'AC');
   assert.equal(leads[0].status, 'novo');
   assert.match(leads[0].whatsapp, /99999/);
-  assert.equal(parseSpreadsheetLeads([{ unknown: 'value' }, {}]).length, 0);
+  const incomplete = parseSpreadsheetLeads([{ unknown: 'value' }, {}, { Instagram: '@empresa' }, { Observações: 'Ligar depois' }, { Email: 'contato@example.com' }]);
+  assert.equal(incomplete.length, 4);
+  assert.match(incomplete[0].notes, /unknown: value/);
+  assert.equal(incomplete[1].instagram, '@empresa');
+  assert.match(incomplete[2].notes, /Ligar depois/);
+  assert.equal(incomplete[3].email, 'contato@example.com');
+  incomplete.forEach(lead => assert.equal(lead.status, 'novo'));
 });
 
 test('batch inserts leads without creating opportunities; remote empty list clears local state', async () => {

@@ -81,31 +81,37 @@ export default function LeadsPage() {
   const handleSpreadsheetUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';
 
     setIsImporting(true);
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
         const data = evt.target?.result;
-        const workbook = xlsx.read(data, { type: 'binary' });
+        const workbook = xlsx.read(data, { type: 'array' });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
+        if (!worksheet) throw new Error('A planilha não contém uma aba para importar.');
         const jsonData = xlsx.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '', raw: false });
         const leadsParaSalvar = parseSpreadsheetLeads(jsonData);
         if (leadsParaSalvar.length === 0) {
-          throw new Error('Nenhum contato reconhecido. Use colunas como Nome, Empresa, Telefone, WhatsApp ou Email.');
+          throw new Error('A planilha não contém linhas preenchidas para importar. Nenhum campo é obrigatório.');
         }
 
         await crmService.addLeads(leadsParaSalvar);
         setImportStats({ total: jsonData.length, count: leadsParaSalvar.length });
       } catch (err) {
         console.error(err);
-        alert('Erro ao processar a planilha. Certifique-se de que é um arquivo CSV ou XLSX válido.');
+        alert(err instanceof Error ? err.message : 'Não foi possível ler a planilha. Tente novamente.');
       } finally {
         setIsImporting(false);
       }
     };
-    reader.readAsBinaryString(file);
+    reader.onerror = () => {
+      setIsImporting(false);
+      alert('Não foi possível ler o arquivo selecionado. Tente selecioná-lo novamente.');
+    };
+    reader.readAsArrayBuffer(file);
   };
 
   // Captação via Apify + Qualificação por IA
@@ -228,14 +234,10 @@ export default function LeadsPage() {
   // Criação manual de lead
   const handleCreateLead = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCompany.trim() || !newName.trim()) {
-      alert('Por favor, informe ao menos o Nome e a Empresa.');
-      return;
-    }
 
     const qualified = qualifyLeadWithAI({
-      name: newName.trim(),
-      company_name: newCompany.trim(),
+      name: newName.trim() || newCompany.trim() || 'Contato não informado',
+      company_name: newCompany.trim() || 'Empresa não informada',
       segment: newSegment,
       city: newCity.trim(),
       whatsapp: newWhatsapp.trim(),
@@ -723,10 +725,9 @@ export default function LeadsPage() {
       >
         <form onSubmit={handleCreateLead} className="space-y-4 text-xs">
           <div>
-            <label className="block text-[#9BA6A0] mb-1 font-medium">Nome do Contato *</label>
+            <label className="block text-[#9BA6A0] mb-1 font-medium">Nome do Contato</label>
             <input
               type="text"
-              required
               placeholder="Ex: Dr. Roberto Silva"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -735,10 +736,9 @@ export default function LeadsPage() {
           </div>
 
           <div>
-            <label className="block text-[#9BA6A0] mb-1 font-medium">Empresa / Razão Social *</label>
+            <label className="block text-[#9BA6A0] mb-1 font-medium">Empresa / Razão Social</label>
             <input
               type="text"
-              required
               placeholder="Ex: Silva Odontologia Integrada"
               value={newCompany}
               onChange={(e) => setNewCompany(e.target.value)}

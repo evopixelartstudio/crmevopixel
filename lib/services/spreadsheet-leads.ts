@@ -7,7 +7,10 @@ const normalizeHeader = (value: string): string => value
 
 export function parseSpreadsheetLeads(rows: Record<string, unknown>[]): Omit<Lead, 'id'>[] {
   const leads: Omit<Lead, 'id'>[] = [];
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
+    const originalData = Object.entries(row)
+      .filter(([, value]) => value !== undefined && value !== null && String(value).trim());
+    if (originalData.length === 0) continue;
     const columns = new Map(Object.entries(row).map(([key, value]) => [normalizeHeader(key), value]));
     const read = (...aliases: string[]): string => {
       for (const alias of aliases) {
@@ -21,11 +24,9 @@ export function parseSpreadsheetLeads(rows: Record<string, unknown>[]): Omit<Lea
     const phone = read('telefone', 'phone', 'phone number', 'telefone comercial', 'celular', 'tel');
     const whatsapp = read('whatsapp', 'whats', 'numero whatsapp', 'whatsapp number') || phone;
     const email = read('email', 'e-mail', 'email address', 'correio eletrônico');
-    // Não criar contatos fictícios para linhas vazias ou colunas desconhecidas.
-    if (!name && !company && !phone && !whatsapp && !email) continue;
     const qualified = qualifyLeadWithAI({
-      name: name || company || email || whatsapp,
-      company_name: company || name || email || whatsapp,
+      name: name || company || email || whatsapp || `Contato importado ${index + 1}`,
+      company_name: company || name || 'Empresa não informada',
       phone,
       whatsapp,
       email,
@@ -39,6 +40,7 @@ export function parseSpreadsheetLeads(rows: Record<string, unknown>[]): Omit<Lea
     qualified.website = read('site', 'website', 'website url', 'site da empresa');
     const notes = read('observações', 'observacao', 'notes', 'notas');
     if (notes) qualified.notes = `${notes}\n${qualified.notes}`;
+    qualified.notes = `${qualified.notes}\nDados originais da planilha:\n${originalData.map(([key, value]) => `${key}: ${String(value)}`).join('\n')}`;
     leads.push(qualified);
   }
   return leads;
