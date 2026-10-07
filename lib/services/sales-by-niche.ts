@@ -7,10 +7,13 @@ export function getSalesByNiche(
   historical: HistoricalProject[], projects: Project[], opportunities: Opportunity[],
   leads: Lead[], clients: Client[], period: SalesPeriod = 'historico', now = new Date(),
 ): NicheSales[] {
-  const normalize = (value?: string) => (value || '').trim().toLocaleLowerCase('pt-BR');
-  const sales: { company: string; segment?: string; date?: string; amount: number; notes?: string }[] = [];
+  const normalize = (value?: string) => (value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]+/g, ' ').trim();
+  const contactKey = (value?: string) => normalize(value).replace(/^(?:dr|dra|doutor|doutora)\s+/, '').replace(/\s+(?:advocacia|advogado|advogada|contabilidade)$/, '').trim();
+  const uniqueMatch = <T,>(items: T[]): T | undefined => items.length === 1 ? items[0] : undefined;
+  const meaningfulSegment = (value?: string) => value && !['geral', 'nicho nao informado', 'nao informado'].includes(normalize(value)) ? value.trim() : undefined;
+  const sales: { company: string; contact?: string; segment?: string; date?: string; amount: number; notes?: string }[] = [];
   historical.filter(project => project.status !== 'cancelado').forEach(project => sales.push({
-    company: project.company_name, segment: project.segment, date: project.project_date,
+    company: project.company_name, contact: project.client_name, segment: project.segment, date: project.project_date,
     amount: project.amount_contracted, notes: project.notes,
   }));
   const alreadyCounted = (company: string, amount: number, date?: string) => sales.some(sale =>
@@ -18,12 +21,12 @@ export function getSalesByNiche(
   );
   projects.filter(project => project.status === 'concluido').forEach(project => {
     if (!alreadyCounted(project.company_name, project.amount_contracted || 0, project.deadline)) sales.push({
-      company: project.company_name, segment: project.segment, date: project.deadline, amount: project.amount_contracted || 0,
+      company: project.company_name, contact: project.client_name, segment: project.segment, date: project.deadline, amount: project.amount_contracted || 0,
     });
   });
   opportunities.filter(opp => opp.stage_slug === 'fechado' || opp.stage_slug === 'won').forEach(opp => {
     if (sales.some(sale => sale.notes?.includes(opp.id)) || alreadyCounted(opp.company_name, opp.estimated_value || 0, opp.closed_at || opp.updated_at)) return;
-    sales.push({ company: opp.company_name, segment: opp.leads?.segment || leads.find(lead => lead.id === opp.lead_id)?.segment,
+    sales.push({ company: opp.company_name, contact: opp.leads?.name || opp.lead_name, segment: opp.leads?.segment || leads.find(lead => lead.id === opp.lead_id)?.segment,
       date: opp.closed_at || opp.updated_at, amount: opp.estimated_value || 0 });
   });
   const groups = new Map<string, { niche: string; count: number; customers: NicheSales['customers'] }>();
@@ -41,14 +44,18 @@ export function getSalesByNiche(
         if (date < start) continue;
       }
     }
-    const niche = sale.segment?.trim() || clients.find(client => normalize(client.company_name) === normalize(sale.company))?.segment?.trim() || 'Nicho não informado';
+    const client = uniqueMatch(clients.filter(client => normalize(client.company_name) === normalize(sale.company)))
+      || (contactKey(sale.contact) ? uniqueMatch(clients.filter(client => contactKey(client.name) === contactKey(sale.contact))) : undefined)
+      || (contactKey(sale.company) ? uniqueMatch(clients.filter(client => contactKey(client.name) === contactKey(sale.company))) : undefined);
+    const lead = uniqueMatch(leads.filter(lead => normalize(lead.company_name) === normalize(sale.company)));
+    const niche = meaningfulSegment(client?.segment) || meaningfulSegment(sale.segment) || meaningfulSegment(lead?.segment) || 'Nicho não informado';
     const key = normalize(niche);
     const group = groups.get(key) || { niche, count: 0, customers: [] };
     group.count++;
-    const company = sale.company?.trim() || 'Cliente não informado';
+    const company = client?.company_name?.trim() || sale.company?.trim() || 'Cliente não informado';
     const customer = group.customers.find(customer => normalize(customer.company) === normalize(company));
     if (customer) customer.count++;
-    else group.customers.push({ company, count: 1, clientId: clients.find(client => normalize(client.company_name) === normalize(company))?.id });
+    else group.customers.push({ company, count: 1, clientId: client?.id });
     groups.set(key, group);
   }
   const total = [...groups.values()].reduce((sum, group) => sum + group.count, 0);

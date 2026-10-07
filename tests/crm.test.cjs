@@ -51,6 +51,24 @@ test('spreadsheet WhatsApp / telefone header imports wa.me links and recovers ex
 });
 const { getSalesByNiche } = require('../lib/services/sales-by-niche.ts');
 
+test('sales inherit registered niches when historical company names differ from client company names', () => {
+  const clients = [
+    { id: 'hilton', company_name: 'HB Barros', name: 'Dr Hilton', segment: 'Advocacia' },
+    { id: 'israel', company_name: 'Contap', name: 'Israel', segment: 'Contabilidade' },
+  ];
+  const history = [
+    { company_name: 'Hilton Advocacia', client_name: 'Dr. Hilton', status: 'liquidado', amount_contracted: 100, project_date: '2026-10-06' },
+    { company_name: 'Israel Contabilidade', client_name: '', status: 'liquidado', amount_contracted: 200, project_date: '2026-10-06' },
+  ];
+  const groups = getSalesByNiche(history, [], [], [], clients);
+  assert.equal(groups.some(group => group.niche === 'Nicho não informado'), false);
+  assert.equal(groups.find(group => group.niche === 'Advocacia').customers[0].company, 'HB Barros');
+  assert.equal(groups.find(group => group.niche === 'Advocacia').customers[0].clientId, 'hilton');
+  assert.equal(groups.find(group => group.niche === 'Contabilidade').customers[0].company, 'Contap');
+  assert.equal(groups.find(group => group.niche === 'Contabilidade').customers[0].clientId, 'israel');
+  assert.equal(groups.reduce((sum, group) => sum + group.count, 0), 2);
+});
+
 test('sales pie counts sold niches only, excludes canceled/open records and deduplicates mirrored sales', () => {
   const historical = [
     { id: 'h1', company_name: 'Alfa', segment: 'Advocacia', amount_contracted: 100, project_date: '2026-10-06', status: 'liquidado', notes: 'Pipeline (o1)' },
