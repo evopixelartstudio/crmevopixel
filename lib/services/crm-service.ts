@@ -558,6 +558,7 @@ class CrmService {
   }
 
   public addLead(leadData: Omit<Lead, 'id'>): Lead {
+    this.leadRevision++;
     const generatedId =
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()

@@ -31,6 +31,32 @@ const dbService = new Proxy({}, {
 const dbPath = require.resolve('../lib/supabase/db-service.ts');
 require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { dbService } };
 const { crmService } = require('../lib/services/crm-service.ts');
+const { hasEnteredPipeline } = require('../lib/services/pipeline-entry.ts');
+
+test('new leads stay outside first contact until explicitly contacted, including imported leads', () => {
+  const lead = { id: 'uncontacted', status: 'novo' };
+  const opportunity = { lead_id: lead.id, stage_slug: 'primeiro_contato', leads: lead };
+  assert.equal(hasEnteredPipeline(opportunity, [lead]), false);
+  assert.equal(hasEnteredPipeline(opportunity, []), false);
+  assert.equal(hasEnteredPipeline(opportunity, [{ ...lead, status: 'em_contato' }]), true);
+  assert.equal(hasEnteredPipeline({ ...opportunity, stage_slug: 'proposta' }, [lead]), true);
+  assert.equal(hasEnteredPipeline({ stage_slug: 'primeiro_contato' }, []), true);
+});
+
+test('manual lead creation survives an in-flight refresh and creates no opportunity', async () => {
+  let resolveLoad;
+  remoteLeads = new Promise(resolve => { resolveLoad = resolve; });
+  const loading = crmService.initFromSupabase(true);
+  const before = crmService.getOpportunities().length;
+  const lead = crmService.addLead({ name: 'Manual contact', company_name: 'Manual company', status: 'novo' });
+  resolveLoad([]);
+  await loading;
+  assert.equal(crmService.getLeadById(lead.id).status, 'novo');
+  assert.equal(crmService.getOpportunities().length, before);
+  remoteLeads = [];
+  await crmService.initFromSupabase(true);
+  inserted.length = 0;
+});
 const { parseSpreadsheetLeads, recoverSpreadsheetBusinessName, recoverSpreadsheetWhatsApp } = require('../lib/services/spreadsheet-leads.ts');
 const { cleanPhoneNumber, getWhatsAppUrl } = require('../lib/utils/whatsapp.ts');
 

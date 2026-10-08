@@ -2,6 +2,7 @@
 
 import { deletePipelineOpportunities } from '@/lib/services/pipeline-deletion';
 import { ensureFollowUpStages } from '@/lib/services/pipeline-follow-up-stages';
+import { hasEnteredPipeline } from '@/lib/services/pipeline-entry';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { getSupabase } from '@/lib/supabase/client';
@@ -434,7 +435,7 @@ export default function PipelinePage() {
         mapRowToOpportunity(row, stageMap, parsedLeads)
       );
 
-      setOpportunities(loadedOpps);
+      setOpportunities(loadedOpps.filter(opp => hasEnteredPipeline(opp, parsedLeads)));
       crmService.setOpportunitiesFromSupabase(loadedOpps);
     } catch (err: any) {
       console.error('Erro ao carregar Pipeline do Supabase:', err);
@@ -450,6 +451,13 @@ export default function PipelinePage() {
     const supabase = getSupabase();
     const channel = supabase
       .channel('pipeline-realtime-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'leads' },
+        () => {
+          fetchPipelineData();
+        }
+      )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'opportunities' },
@@ -725,6 +733,13 @@ export default function PipelinePage() {
 
       const stageMap = new Map<string, PipelineStage>(stages.map((s) => [s.id, s]));
       const createdOpp = mapRowToOpportunity(createdData, stageMap, leadsList);
+
+      if (createdOpp.lead_id) {
+        const lead = crmService.getLeadById(createdOpp.lead_id);
+        if (lead && lead.status !== 'convertido') {
+          crmService.updateLeadStatus(lead.id, 'em_contato');
+        }
+      }
 
       const nextOpps = [createdOpp, ...opportunities];
       setOpportunities(nextOpps);
