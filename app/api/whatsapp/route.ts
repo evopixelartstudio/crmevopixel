@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
-import { formatWhatsAppNumber } from '@/lib/utils/whatsapp';
+import { formatWhatsAppNumber, whatsAppPhoneAliases } from '@/lib/utils/whatsapp';
 import { normalizeWhatsAppMessages } from '@/lib/services/whatsapp-messages';
 import { cloudDatabase } from '@/lib/server/crm-access';
 import { normalizeGoStatus, normalizeGoQr } from '@/lib/services/evolution-go';
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
       case 'read': {
         if (!go) { result = { read: true }; break; }
         if (typeof body.phone !== 'string' || !/^\d{10,15}$/.test(body.phone) || typeof body.through !== 'number' || !Number.isFinite(body.through) || body.through <= 0 || body.through > Date.now() / 1000 + 60) return NextResponse.json({ error: 'Conversa inválida.' }, { status: 400 });
-        const { error } = await cloudDatabase().from('whatsapp_messages').update({ status: 'read' }).eq('instance', process.env.EVOLUTION_INSTANCE!).eq('phone', body.phone).eq('from_me', false).eq('status', 'received').lte('sent_at', new Date(body.through * 1000).toISOString());
+        const { error } = await cloudDatabase().from('whatsapp_messages').update({ status: 'read' }).eq('instance', process.env.EVOLUTION_INSTANCE!).in('phone', whatsAppPhoneAliases(body.phone)).eq('from_me', false).eq('status', 'received').lte('sent_at', new Date(body.through * 1000).toISOString());
         if (error) throw new Error('Não foi possível marcar a conversa como lida.');
         result = { read: true }; break;
       }
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
         if (!/^\d{10,15}$/.test(number)) return NextResponse.json({ error: 'Telefone inválido. Inclua DDD e número.' }, { status: 400 });
         if (body.action === 'messages') {
           if (go) {
-            const { data, error } = await cloudDatabase().from('whatsapp_messages').select('message_id, from_me, body, sent_at, status').eq('instance', process.env.EVOLUTION_INSTANCE!).eq('phone', number).order('sent_at', { ascending: false }).limit(100);
+            const { data, error } = await cloudDatabase().from('whatsapp_messages').select('message_id, from_me, body, sent_at, status').eq('instance', process.env.EVOLUTION_INSTANCE!).in('phone', whatsAppPhoneAliases(number)).order('sent_at', { ascending: false }).limit(100);
             if (error) throw new Error('Não foi possível consultar o histórico. Execute 20261009_crm_cloud_only.sql e verifique o Supabase.');
             result = (data ?? []).reverse().map(m => ({ id: m.message_id, fromMe: m.from_me, text: m.body, timestamp: Date.parse(m.sent_at) / 1000, status: m.status }));
           } else result = normalizeWhatsAppMessages(await evolution(`chat/findMessages/${instance}`, { where: { key: { remoteJid: `${number}@s.whatsapp.net` } }, page: 1, offset: 100 }));

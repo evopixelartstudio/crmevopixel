@@ -29,3 +29,20 @@ test('never associates groups, broadcasts or unresolved LIDs with CRM customers'
   }
   assert.equal(parseGoMessage({ event: 'Connected' }), null);
 });
+
+test('mirrors mobile outgoing LID messages using recipient identity, never own sender identity', () => {
+  const event = { event: 'Message', data: { Info: { ID: 'mobile', Chat: '1234567890123@lid', IsFromMe: true, SenderAlt: '5511988887777@s.whatsapp.net', RecipientAlt: '553498327904@s.whatsapp.net', Timestamp: '1791540000' }, Message: { conversation: 'Sent from phone' } } };
+  assert.equal(parseGoMessage(event).phone, '553498327904');
+  assert.equal(parseGoMessage(event).fromMe, true);
+  assert.equal(parseGoMessage(event).timestamp, 1791540000);
+  assert.equal(parseGoMessage({ ...event, data: { ...event.data, Info: { ...event.data.Info, RecipientAlt: undefined } } }), null);
+});
+
+test('unwraps device sent messages and accepts key-based provider events', () => {
+  const mobile = { event: 'message', data: { Info: { ID: 'device', Chat: '1234567890123@lid', Timestamp: 1791540000 }, Message: { deviceSentMessage: { destinationJid: '553498327904@s.whatsapp.net', message: { ephemeralMessage: { message: { conversation: 'Mobile' } } } } } } };
+  assert.equal(parseGoMessage(mobile).text, 'Mobile');
+  assert.equal(parseGoMessage(mobile).fromMe, true);
+  const sent = { event: 'send_message', data: { key: { id: 'sent', remoteJid: '553498327904@s.whatsapp.net' }, messageTimestamp: '1791540000', message: { conversation: 'Reply' } } };
+  assert.equal(parseGoMessage(sent).fromMe, true);
+  assert.equal(parseGoMessage(sent).text, 'Reply');
+});

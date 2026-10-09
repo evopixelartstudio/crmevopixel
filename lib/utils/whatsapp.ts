@@ -45,6 +45,18 @@ export function getWhatsAppUrl(phone?: string, text?: string): string {
   return baseUrl;
 }
 
+// WhatsApp may identify Brazilian mobiles without the ninth digit.
+// Only mobile prefixes qualify; landlines and foreign numbers stay distinct.
+export function whatsAppPhoneKey(phone: string): string {
+  const number = formatWhatsAppNumber(phone);
+  return /^55\d{2}9[6-9]\d{7}$/.test(number) ? number.slice(0, 4) + number.slice(5) : number;
+}
+
+export function whatsAppPhoneAliases(phone: string): string[] {
+  const key = whatsAppPhoneKey(phone);
+  return /^55\d{2}[6-9]\d{7}$/.test(key) ? [key, key.slice(0, 4) + '9' + key.slice(4)] : [key];
+}
+
 export function openWhatsApp(phone?: string, text?: string): boolean {
   const url = getWhatsAppUrl(phone, text);
   if (!url) {

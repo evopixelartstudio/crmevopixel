@@ -6,7 +6,7 @@ import { ArrowLeft, MessageSquare, Send } from 'lucide-react';
 import { crmService } from '@/lib/services/crm-service';
 import { dbService } from '@/lib/supabase/db-service';
 import { useCrmSync } from '@/lib/hooks/useCrmSync';
-import { formatWhatsAppNumber } from '@/lib/utils/whatsapp';
+import { formatWhatsAppNumber, whatsAppPhoneKey } from '@/lib/utils/whatsapp';
 import { isNegotiationStage } from '@/lib/services/pipeline-stages';
 import type { WhatsAppMessage } from '@/lib/services/whatsapp-messages';
 import type { PipelineStage } from '@/types/database';
@@ -40,25 +40,29 @@ export default function WhatsAppPage() {
   const contacts = new Map<string, { phone: string; name: string; company: string; leadIds: string[]; clientId?: string }>();
   for (const client of crmService.getClients()) {
     const phone = formatWhatsAppNumber(client.whatsapp || client.phone);
-    if (/^\d{10,15}$/.test(phone)) contacts.set(phone, { phone, name: client.name, company: client.company_name, leadIds: [], clientId: client.id });
+    if (/^\d{10,15}$/.test(phone)) contacts.set(whatsAppPhoneKey(phone), { phone, name: client.name, company: client.company_name, leadIds: [], clientId: client.id });
   }
   for (const lead of crmService.getLeads()) {
     const phone = formatWhatsAppNumber(lead.whatsapp || lead.phone);
     if (!/^\d{10,15}$/.test(phone)) continue;
-    const existing = contacts.get(phone);
+    const existing = contacts.get(whatsAppPhoneKey(phone));
     if (existing) existing.leadIds.push(lead.id);
-    else contacts.set(phone, { phone, name: lead.name, company: lead.company_name, leadIds: [lead.id] });
+    else contacts.set(whatsAppPhoneKey(phone), { phone, name: lead.name, company: lead.company_name, leadIds: [lead.id] });
   }
   for (const conversation of conversations) {
-    if (!contacts.has(conversation.phone)) contacts.set(conversation.phone, { phone: conversation.phone, name: `+${conversation.phone}`, company: '', leadIds: [] });
+    if (!contacts.has(whatsAppPhoneKey(conversation.phone))) contacts.set(whatsAppPhoneKey(conversation.phone), { phone: conversation.phone, name: `+${conversation.phone}`, company: '', leadIds: [] });
   }
-  const summaries = new Map(conversations.map(c => [c.phone, c]));
+  const summaries = new Map<string, WhatsAppConversation>();
+  for (const conversation of conversations) {
+    const key = whatsAppPhoneKey(conversation.phone), existing = summaries.get(key);
+    summaries.set(key, existing ? { ...(existing.timestamp > conversation.timestamp ? existing : conversation), unread: existing.unread + conversation.unread } : conversation);
+  }
   const unreadTotal = conversations.reduce((total, c) => total + c.unread, 0);
-  const contact = contacts.get(selected);
+  const contact = contacts.get(whatsAppPhoneKey(selected));
   const opportunities = crmService.getOpportunities().filter(o => contact?.leadIds.includes(o.lead_id ?? ''));
   const opportunity = opportunities.find(o => o.id === oppId) ?? opportunities[0];
   const visible = [...contacts.values()].filter(c => `${c.name} ${c.company} ${c.phone}`.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR')))
-    .sort((a, b) => (summaries.get(b.phone)?.timestamp ?? 0) - (summaries.get(a.phone)?.timestamp ?? 0) || a.name.localeCompare(b.name, 'pt-BR'));
+    .sort((a, b) => (summaries.get(whatsAppPhoneKey(b.phone))?.timestamp ?? 0) - (summaries.get(whatsAppPhoneKey(a.phone))?.timestamp ?? 0) || a.name.localeCompare(b.name, 'pt-BR'));
 
   const api = useCallback(async (action: string, extra = {}) => {
     const response = await fetch('/api/whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...extra }) });
@@ -192,7 +196,7 @@ export default function WhatsAppPage() {
       <aside className={`${selected ? 'hidden md:flex' : 'flex'} min-h-0 flex-col border-r border-[var(--evo-border)] p-3`}>
         <label className="sr-only" htmlFor="contact-search">Buscar contato</label><input id="contact-search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar nome ou telefone" className={`${control} w-full`} />
         <div className="mt-2 min-h-0 flex-1 overflow-y-auto" aria-busy={inboxLoading}>{visible.map(c => {
-          const summary = summaries.get(c.phone);
+          const summary = summaries.get(whatsAppPhoneKey(c.phone));
           return <button key={c.phone} aria-pressed={selected === c.phone} onClick={() => { setSelected(c.phone); setNotice(''); setError(''); }} className={`w-full rounded-lg px-3 py-3 text-left focus-visible:outline focus-visible:outline-[var(--evo-accent)] ${selected === c.phone ? 'bg-[var(--evo-surface2)]' : 'hover:bg-[var(--evo-surface)]'}`}>
             <div className="flex items-center justify-between gap-2"><span className={`truncate text-sm ${summary?.unread ? 'font-semibold' : 'font-medium'}`}>{c.name}</span>{summary && <time dateTime={new Date(summary.timestamp * 1000).toISOString()} className="shrink-0 text-[10px] text-[var(--evo-muted)]">{new Date(summary.timestamp * 1000).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</time>}</div>
             <div className="mt-1 flex items-center justify-between gap-2"><span className="truncate text-xs text-[var(--evo-muted)]">{summary ? `${summary.fromMe ? 'Você: ' : ''}${summary.preview}` : c.company && c.company !== c.name ? c.company : `+${c.phone}`}</span>{!!summary?.unread && <span aria-label={`${summary.unread} mensagens não lidas`} className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-[var(--evo-accent)] px-1 text-[10px] font-semibold text-[var(--evo-bg)]">{summary.unread}</span>}</div>

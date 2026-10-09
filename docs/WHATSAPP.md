@@ -57,6 +57,10 @@ Contatos com o mesmo número são agrupados. Oportunidades são vinculadas pelo 
 
 ## Validação com a instância real
 
+Mensagens enviadas pelo celular também entram pelo webhook. O CRM aceita eventos com `Info/Message` ou `key/message`, desembrulha mensagens de aparelhos vinculados e usa `RecipientAlt` para identificar o destinatário quando a conversa usa LID. Um LID sem telefone correspondente não é convertido em número inventado. Números brasileiros de celular com e sem o nono dígito são associados ao mesmo cadastro e consultados juntos no histórico, sem modificar os cadastros.
+
+Após atualizar, clique em **Configurar recebimento** e teste uma nova mensagem enviada pelo celular. Eventos descartados antes da atualização não são recuperados automaticamente; a exibição do histórico anterior depende do que a Evolution disponibiliza.
+
 - Conectar pelo QR Code e aguardar o estado **Conectado**.
 - Receber uma mensagem de um contato cadastrado e verificar sua exibição.
 - Enviar um texto e verificar a chegada no celular do destinatário.
