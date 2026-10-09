@@ -1,6 +1,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
+let runtimeConfig: { url: string; key: string } | null = null;
+
 function getInitialConfig() {
+  if (runtimeConfig) return runtimeConfig;
   const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   const envKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
   // Configuração publicada é compartilhada por todos os dispositivos.
@@ -8,18 +11,9 @@ function getInitialConfig() {
     return { url: envUrl, key: envKey };
   }
 
-  if (typeof window !== 'undefined') {
-    const localUrl = localStorage.getItem('evocrm_supabase_url');
-    const localKey = localStorage.getItem('evocrm_supabase_anon_key');
-    if (localUrl && localKey && !localUrl.includes('placeholder')) {
-      return { url: localUrl, key: localKey };
-    }
-  }
-
   return { url: envUrl, key: envKey };
 }
 
-const config = getInitialConfig();
 
 export function isSupabaseConfigured(): boolean {
   const c = getInitialConfig();
@@ -39,7 +33,7 @@ export function getSupabase(): SupabaseClient {
     if (!activeClient) {
       activeClient = createClient(c.url, c.key, {
         auth: {
-          persistSession: true,
+          persistSession: false,
           autoRefreshToken: true,
         },
       });
@@ -54,13 +48,10 @@ export function getSupabase(): SupabaseClient {
 }
 
 export function updateClientConfig(url: string, key: string) {
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('evocrm_supabase_url', url);
-    localStorage.setItem('evocrm_supabase_anon_key', key);
-  }
+  runtimeConfig = { url, key };
   activeClient = createClient(url, key, {
     auth: {
-      persistSession: true,
+      persistSession: false,
       autoRefreshToken: true,
     },
   });

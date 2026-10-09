@@ -91,127 +91,7 @@ class CrmService {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      this.loadFromLocalStorage();
       this.initFromSupabase();
-    }
-  }
-
-  private saveToLocalStorage(key: string, data: any): void {
-    if (typeof window === 'undefined') return;
-    if (key === 'opps') return; // Oportunidades são gerenciadas 100% via Supabase
-    try {
-      localStorage.setItem(`evocrm_${key}`, JSON.stringify(data));
-    } catch (e) {
-      console.warn(`Erro ao salvar ${key} no localStorage:`, e);
-    }
-  }
-
-  private loadFromLocalStorage(): void {
-    if (typeof window === 'undefined') return;
-    try {
-      localStorage.removeItem('evocrm_opps');
-      const cachedLeads = localStorage.getItem('evocrm_leads');
-      if (cachedLeads) {
-        const parsed = JSON.parse(cachedLeads);
-        if (Array.isArray(parsed)) {
-          this.leads = parsed.map((l: any) => ({
-            ...l,
-            name: l.name || 'Contato',
-            company_name: l.company_name || l.name || 'Empresa',
-          }));
-        }
-      }
-      const cachedClients = localStorage.getItem('evocrm_clients');
-      if (cachedClients) {
-        const parsed = JSON.parse(cachedClients);
-        if (Array.isArray(parsed)) {
-          this.clients = parsed.map((c: any) => ({
-            ...c,
-            name: c.name || c.company_name || 'Cliente',
-            company_name: c.company_name || c.name || 'Empresa',
-          }));
-        }
-      }
-      const cachedProjects = localStorage.getItem('evocrm_projects');
-      if (cachedProjects) {
-        const parsed = JSON.parse(cachedProjects);
-        if (Array.isArray(parsed)) {
-          this.projects = parsed.map((p: any) => ({
-            ...p,
-            name: p.name || 'Projeto',
-            company_name: p.company_name || p.client_name || p.name || 'Cliente',
-            client_name: p.client_name || p.company_name || 'Contato',
-            services: Array.isArray(p.services) ? p.services : [],
-          }));
-        }
-      }
-      const cachedHistorical = localStorage.getItem('evocrm_historical_projects');
-      if (cachedHistorical) {
-        const parsed = JSON.parse(cachedHistorical);
-        if (Array.isArray(parsed)) {
-          this.historicalProjects = parsed.map((hp: any) => ({
-            ...hp,
-            company_name: hp.company_name || hp.client_name || 'Cliente',
-            client_name: hp.client_name || hp.company_name || 'Contato',
-          }));
-        }
-      }
-      const cachedMonthly = localStorage.getItem('evocrm_monthly_clients');
-      if (cachedMonthly) {
-        const parsed = JSON.parse(cachedMonthly);
-        if (Array.isArray(parsed)) {
-          this.monthlyClients = parsed.map((m: any) => ({
-            ...m,
-            company_name: m.company_name || m.client_name || 'Cliente',
-            client_name: m.client_name || m.company_name || 'Contato',
-          }));
-        }
-      }
-      const cachedServices = localStorage.getItem('evocrm_services');
-      if (cachedServices) {
-        const parsed = JSON.parse(cachedServices);
-        if (Array.isArray(parsed)) {
-          this.services = parsed;
-        }
-      }
-      const cachedTasks = localStorage.getItem('evocrm_tasks');
-      if (cachedTasks) {
-        const parsed = JSON.parse(cachedTasks);
-        if (Array.isArray(parsed)) {
-          this.tasks = parsed.map((t: any) => ({
-            ...t,
-            title: t.title || 'Tarefa',
-            related_to: t.related_to || t.description || 'Operação EvoPixel',
-            due_date: t.due_date || new Date().toISOString().split('T')[0],
-            status: t.status || 'pendente',
-            priority: t.priority || 'media',
-          }));
-        }
-      }
-      const cachedTransactions = localStorage.getItem('evocrm_transactions');
-      if (cachedTransactions) {
-        const parsed = JSON.parse(cachedTransactions);
-        if (Array.isArray(parsed)) {
-          this.transactions = parsed.map((t: any) => ({
-            ...t,
-            title: t.title || 'Lançamento',
-            client_name: t.client_name || t.title || 'Cliente',
-            amount_contracted: Number(t.amount_contracted) || 0,
-            amount_received: Number(t.amount_received) || 0,
-            amount_pending: Number(t.amount_pending) || 0,
-            due_date: t.due_date || new Date().toISOString().split('T')[0],
-          }));
-        }
-      }
-      const cachedExpenses = localStorage.getItem('evocrm_monthly_expenses');
-      if (cachedExpenses) {
-        const parsed = JSON.parse(cachedExpenses);
-        if (Array.isArray(parsed)) {
-          this.monthlyExpenses = parsed;
-        }
-      }
-    } catch (e) {
-      console.warn('Erro ao carregar do localStorage:', e);
     }
   }
 
@@ -247,6 +127,7 @@ class CrmService {
         tasks,
         transactions,
         services,
+        expenses,
       ] = await Promise.all([
         dbService.getClients(),
         dbService.getMonthlyClients(),
@@ -260,14 +141,14 @@ class CrmService {
         dbService.getTasks(),
         dbService.getTransactions(),
         dbService.getServices(),
+        dbService.getMonthlyExpenses(),
       ]);
 
       let changed = false;
-      const hasLocalServices =
-        typeof window !== 'undefined' && localStorage.getItem('evocrm_services') !== null;
-      if (!hasLocalServices && services && services.length > 0) {
+      if (expenses !== null) { this.monthlyExpenses = expenses; changed = true; }
+      if (services !== null) {
         this.services = services;
-        this.saveToLocalStorage('services', this.services);
+
         changed = true;
       }
       if (projects && projects.length > 0) {
@@ -284,7 +165,7 @@ class CrmService {
             website_url: p.website_url || local?.website_url,
           };
         });
-        this.saveToLocalStorage('projects', this.projects);
+
         changed = true;
       }
       if (historical && historical.length > 0) {
@@ -299,7 +180,7 @@ class CrmService {
             website_url: p.website_url || local?.website_url,
           };
         });
-        this.saveToLocalStorage('historical_projects', this.historicalProjects);
+
         changed = true;
       }
       if (clients && clients.length > 0) { 
@@ -317,17 +198,17 @@ class CrmService {
             website_url: c.website_url || local?.website_url || completedProjSite,
           };
         });
-        this.saveToLocalStorage('clients', this.clients);
+
         changed = true; 
       }
       if (monthly && monthly.length > 0) {
         this.monthlyClients = monthly;
-        this.saveToLocalStorage('monthly_clients', this.monthlyClients);
+
         changed = true;
       }
       if (leads !== null && leadRevisionAtStart === this.leadRevision) {
         this.leads = leads;
-        this.saveToLocalStorage('leads', this.leads);
+
         changed = true;
       }
       if (prospects && prospects.length > 0) { this.prospects = prospects; changed = true; }
@@ -337,26 +218,22 @@ class CrmService {
       }
       if (proposals && proposals.length > 0) { this.proposals = proposals; changed = true; }
       if (contracts && contracts.length > 0) { this.contracts = contracts; changed = true; }
-      const hasLocalTasks =
-        typeof window !== 'undefined' && localStorage.getItem('evocrm_tasks') !== null;
-      if (!hasLocalTasks && tasks && tasks.length > 0) {
+      if (tasks !== null) {
         this.tasks = tasks.map((t: any) => ({
           ...t,
           title: t.title || 'Tarefa',
           related_to: t.related_to || t.description || 'Operação EvoPixel',
         }));
-        this.saveToLocalStorage('tasks', this.tasks);
+
         changed = true;
       }
-      const hasLocalTx =
-        typeof window !== 'undefined' && localStorage.getItem('evocrm_transactions') !== null;
-      if (!hasLocalTx && transactions && transactions.length > 0) {
+      if (transactions !== null) {
         this.transactions = transactions.map((t: any) => ({
           ...t,
           title: t.title || 'Lançamento',
           client_name: t.client_name || t.title || 'Cliente',
         }));
-        this.saveToLocalStorage('transactions', this.transactions);
+
         changed = true;
       }
 
@@ -539,7 +416,7 @@ class CrmService {
     const lead = this.leads.find(l => l.id === id);
     if (lead) {
       lead.status = status;
-      this.saveToLocalStorage('leads', this.leads);
+
       dbService.updateLead(id, { status });
       this.notify();
     }
@@ -550,7 +427,7 @@ class CrmService {
     const lead = this.leads.find(l => l.id === id);
     if (lead) {
       Object.assign(lead, data);
-      this.saveToLocalStorage('leads', this.leads);
+
       dbService.updateLead(id, data);
       this.notify();
     }
@@ -568,13 +445,13 @@ class CrmService {
       id: generatedId,
     };
     this.leads.unshift(newLead);
-    this.saveToLocalStorage('leads', this.leads);
+
     this.notify();
 
     dbService.insertLead(newLead).then((inserted) => {
       if (inserted && inserted.id && inserted.id !== newLead.id) {
         newLead.id = inserted.id;
-        this.saveToLocalStorage('leads', this.leads);
+
         this.notify();
       }
     });
@@ -599,7 +476,7 @@ class CrmService {
     if (confirmedLeads.length > 0) {
       const confirmedIds = new Set(confirmedLeads.map(lead => lead.id));
       this.leads = [...confirmedLeads, ...this.leads.filter(lead => !confirmedIds.has(lead.id))];
-      this.saveToLocalStorage('leads', this.leads);
+
       this.notify();
     }
     if (confirmedLeads.length !== newLeads.length) {
@@ -609,7 +486,7 @@ class CrmService {
 
   public deleteLead(id: string): void {
     this.leads = this.leads.filter(l => l.id !== id);
-    this.saveToLocalStorage('leads', this.leads);
+
     dbService.deleteLead(id);
     this.notify();
   }
@@ -617,7 +494,7 @@ class CrmService {
   public deleteLeads(ids: string[]): void {
     const idSet = new Set(ids);
     this.leads = this.leads.filter(l => !idSet.has(l.id));
-    this.saveToLocalStorage('leads', this.leads);
+
     dbService.deleteLeads(ids);
     this.notify();
   }
@@ -725,7 +602,7 @@ class CrmService {
     });
 
     if (modified) {
-      this.saveToLocalStorage('opps', this.opportunities);
+
       this.notify();
     }
     return modified;
@@ -770,7 +647,7 @@ class CrmService {
         dbService.insertTask(newTask);
       }
     });
-    this.saveToLocalStorage('tasks', this.tasks);
+
 
     // Garantir também a criação do projeto ativo na aba Projetos se ainda não existir
     const existingProj = this.projects.find(
@@ -825,7 +702,7 @@ class CrmService {
     );
     if (lead && lead.status !== 'convertido') {
       lead.status = 'convertido';
-      this.saveToLocalStorage('leads', this.leads);
+
       dbService.updateLead(lead.id, { status: 'convertido' });
     }
 
@@ -891,7 +768,7 @@ class CrmService {
       if ((!clientRecord.name || clientRecord.name === 'N/A') && (lead.name || clientName)) {
         clientRecord.name = lead.name || clientName;
       }
-      this.saveToLocalStorage('clients', this.clients);
+
       dbService.updateClient(clientRecord.id, clientRecord);
     }
 
@@ -932,7 +809,14 @@ class CrmService {
     }
   }
 
-  public updateOpportunityStage(id: string, newStageSlug: string): Opportunity | undefined {
+  public async updateOpportunityStageConfirmed(id: string, newStageSlug: string): Promise<Opportunity> {
+    if (!this.opportunities.some(o => o.id === id)) throw new Error('Oportunidade não encontrada.');
+    const saved = await dbService.updateOpportunityStage(id, newStageSlug);
+    if (!saved) throw new Error('Não foi possível salvar a etapa no Supabase. Tente novamente.');
+    return this.updateOpportunityStage(id, newStageSlug, true)!;
+  }
+
+  public updateOpportunityStage(id: string, newStageSlug: string, alreadySaved = false): Opportunity | undefined {
     const opp = this.opportunities.find(o => o.id === id);
     if (opp) {
       const now = new Date().toISOString();
@@ -944,7 +828,7 @@ class CrmService {
       } else if (newStageSlug === 'projeto_em_andamento') {
         opp.probability = 90;
       }
-      dbService.updateOpportunityStage(id, newStageSlug);
+      if (!alreadySaved) dbService.updateOpportunityStage(id, newStageSlug);
 
       if (newStageSlug === 'projeto_em_andamento') {
         this.handleOpportunityEnteredProjectInProgress(opp);
@@ -979,7 +863,7 @@ class CrmService {
     };
     this.opportunities.unshift(newOpp);
     dbService.insertOpportunity(newOpp);
-    this.saveToLocalStorage('opps', this.opportunities);
+
 
     // Quando o lead entra no Pipeline (ex: Primeiro Contato), marca como 'em_contato' e retira da fila inicial de Leads
     const linkedLead = this.leads.find(
@@ -987,7 +871,7 @@ class CrmService {
     );
     if (linkedLead && linkedLead.status !== 'convertido') {
       linkedLead.status = 'em_contato';
-      this.saveToLocalStorage('leads', this.leads);
+
       dbService.updateLead(linkedLead.id, { status: 'em_contato' });
     }
 
@@ -1027,11 +911,10 @@ class CrmService {
       if (data.lead_name !== undefined) linkedLead.name = data.lead_name;
       if (data.temperature !== undefined) linkedLead.temperature = data.temperature;
       if (data.services !== undefined) linkedLead.services = data.services;
-      this.saveToLocalStorage('leads', this.leads);
+
       dbService.updateLead(linkedLead.id, linkedLead);
     }
 
-    this.saveToLocalStorage('opps', this.opportunities);
     dbService.updateOpportunity(id, opp);
 
     if (opp.stage_slug === 'projeto_em_andamento' && previousStage !== 'projeto_em_andamento') {
@@ -1048,7 +931,7 @@ class CrmService {
     const targetOpp = this.opportunities.find(o => o.id === id);
     this.opportunities = this.opportunities.filter(o => o.id !== id);
     dbService.deleteOpportunity(id);
-    this.saveToLocalStorage('opps', this.opportunities);
+
 
     // Remover também o lead vinculado para que não volte a aparecer na lista de Leads
     if (targetOpp) {
@@ -1057,7 +940,7 @@ class CrmService {
       );
       if (matchingLead) {
         this.leads = this.leads.filter((l) => l.id !== matchingLead.id);
-        this.saveToLocalStorage('leads', this.leads);
+
         dbService.deleteLead(matchingLead.id);
       }
     }
@@ -1105,13 +988,13 @@ class CrmService {
       id: generatedId,
     };
     this.services.push(newService);
-    this.saveToLocalStorage('services', this.services);
+
     this.notify();
 
     dbService.insertService(newService).then((inserted) => {
       if (inserted && inserted.id && inserted.id !== newService.id) {
         newService.id = inserted.id;
-        this.saveToLocalStorage('services', this.services);
+
         this.notify();
       }
     });
@@ -1135,7 +1018,7 @@ class CrmService {
             ? Number(serviceData.delivery_time_days)
             : this.services[index].delivery_time_days,
       };
-      this.saveToLocalStorage('services', this.services);
+
       dbService.updateService(id, this.services[index], originalName);
       this.notify();
       return true;
@@ -1148,7 +1031,7 @@ class CrmService {
     const initialLength = this.services.length;
     this.services = this.services.filter(s => s.id !== id);
     if (this.services.length < initialLength) {
-      this.saveToLocalStorage('services', this.services);
+
       dbService.deleteService(id, target?.name);
       this.notify();
       return true;
@@ -1199,7 +1082,7 @@ class CrmService {
       id: `cli-${Date.now()}`,
     };
     this.clients.unshift(newClient);
-    this.saveToLocalStorage('clients', this.clients);
+
     dbService.insertClient(newClient);
     this.notify();
     return newClient;
@@ -1209,7 +1092,7 @@ class CrmService {
     const client = this.clients.find(c => c.id === id);
     if (client) {
       Object.assign(client, data);
-      this.saveToLocalStorage('clients', this.clients);
+
       dbService.updateClient(id, data);
       this.notify();
     }
@@ -1218,7 +1101,7 @@ class CrmService {
 
   public deleteClient(id: string): void {
     this.clients = this.clients.filter(c => c.id !== id);
-    this.saveToLocalStorage('clients', this.clients);
+
     dbService.deleteClient(id);
     this.notify();
   }
@@ -1316,7 +1199,7 @@ class CrmService {
       id: `proj-${Date.now()}`,
     };
     this.projects.unshift(newProject);
-    this.saveToLocalStorage('projects', this.projects);
+
     dbService.insertProject(newProject);
     if (newProject.status === 'concluido') {
       this.syncClientWithCompletedProject(newProject);
@@ -1329,7 +1212,7 @@ class CrmService {
     const project = this.projects.find(p => p.id === id);
     if (project) {
       Object.assign(project, data);
-      this.saveToLocalStorage('projects', this.projects);
+
       dbService.updateProject(id, project);
       if (project.status === 'concluido') {
         this.syncClientWithCompletedProject(project);
@@ -1352,7 +1235,7 @@ class CrmService {
       if (websiteUrl !== undefined && websiteUrl.trim() !== '') {
         project.website_url = websiteUrl.trim();
       }
-      this.saveToLocalStorage('projects', this.projects);
+
       dbService.updateProject(id, project);
       this.syncClientWithCompletedProject(project);
       this.notify();
@@ -1362,7 +1245,7 @@ class CrmService {
 
   public deleteProject(id: string): void {
     this.projects = this.projects.filter(p => p.id !== id);
-    this.saveToLocalStorage('projects', this.projects);
+
     dbService.deleteProject(id);
     this.notify();
   }
@@ -1383,7 +1266,7 @@ class CrmService {
         });
       });
       project.progress_percentage = Math.round((completedItems / (totalItems || 1)) * 100);
-      this.saveToLocalStorage('projects', this.projects);
+
       dbService.updateProject(projectId, project);
       this.notify();
     }
@@ -1396,7 +1279,7 @@ class CrmService {
       id: `hist-${Date.now()}`,
     };
     this.historicalProjects.unshift(newProject);
-    this.saveToLocalStorage('historical_projects', this.historicalProjects);
+
     dbService.insertHistoricalProject(newProject);
     this.syncClientWithHistoricalProject(newProject);
     this.notify();
@@ -1407,7 +1290,7 @@ class CrmService {
     const proj = this.historicalProjects.find(p => p.id === id);
     if (proj) {
       Object.assign(proj, data);
-      this.saveToLocalStorage('historical_projects', this.historicalProjects);
+
       dbService.updateHistoricalProject(id, proj);
       this.syncClientWithHistoricalProject(proj);
       this.notify();
@@ -1417,7 +1300,7 @@ class CrmService {
 
   public deleteHistoricalProject(id: string): void {
     this.historicalProjects = this.historicalProjects.filter(p => p.id !== id);
-    this.saveToLocalStorage('historical_projects', this.historicalProjects);
+
     dbService.deleteHistoricalProject(id);
     this.notify();
   }
@@ -1479,7 +1362,7 @@ class CrmService {
       if (proj.segment && (!client.segment || client.segment === 'Geral')) {
         client.segment = proj.segment;
       }
-      this.saveToLocalStorage('clients', this.clients);
+
       dbService.updateClient(client.id, client);
     }
   }
@@ -1529,7 +1412,7 @@ class CrmService {
       if (proj.segment && (!client.segment || client.segment === 'Geral')) {
         client.segment = proj.segment;
       }
-      this.saveToLocalStorage('clients', this.clients);
+
       dbService.updateClient(client.id, client);
     }
   }
@@ -1676,7 +1559,7 @@ class CrmService {
       id: `mth-${Date.now()}`,
     };
     this.monthlyClients.unshift(newClient);
-    this.saveToLocalStorage('monthly_clients', this.monthlyClients);
+
     dbService.insertMonthlyClient(newClient);
     this.notify();
     return newClient;
@@ -1686,7 +1569,7 @@ class CrmService {
     const client = this.monthlyClients.find((c) => c.id === id);
     if (client) {
       Object.assign(client, data);
-      this.saveToLocalStorage('monthly_clients', this.monthlyClients);
+
       dbService.updateMonthlyClient(id, data);
       this.notify();
     }
@@ -1695,7 +1578,7 @@ class CrmService {
 
   public deleteMonthlyClient(id: string): void {
     this.monthlyClients = this.monthlyClients.filter((c) => c.id !== id);
-    this.saveToLocalStorage('monthly_clients', this.monthlyClients);
+
     dbService.deleteMonthlyClient(id);
     this.notify();
   }
@@ -1710,7 +1593,7 @@ class CrmService {
       if (status === 'pago') {
         client.last_payment_date = new Date().toISOString().split('T')[0];
       }
-      this.saveToLocalStorage('monthly_clients', this.monthlyClients);
+
       dbService.updateMonthlyClient(id, {
         current_month_status: client.current_month_status,
         last_payment_date: client.last_payment_date,
@@ -1762,7 +1645,7 @@ class CrmService {
       id: generatedId,
     };
     this.transactions.unshift(newTx);
-    this.saveToLocalStorage('transactions', this.transactions);
+
     dbService.insertTransaction(newTx);
 
     // Se houver taxa e a opção de gerar despesa estiver ativada, lança a saída operacional automaticamente
@@ -1808,7 +1691,6 @@ class CrmService {
     tx.amount_pending = 0;
     tx.payment_date = pDate;
 
-    this.saveToLocalStorage('transactions', this.transactions);
     dbService.updateTransaction(id, tx);
 
     if (settlement.auto_create_expense && settlement.fee_amount > 0) {
@@ -1852,7 +1734,6 @@ class CrmService {
     const cleanDesc = (proj.notes || '').replace(/\[GATEWAY:[^\]]+\]/g, '').trim();
     proj.notes = cleanDesc ? `${cleanDesc} ${metaTag}` : metaTag;
 
-    this.saveToLocalStorage('historical_projects', this.historicalProjects);
     dbService.updateHistoricalProject(id, proj);
     this.syncClientWithHistoricalProject(proj);
 
@@ -1880,7 +1761,7 @@ class CrmService {
     const tx = this.transactions.find((t) => t.id === id);
     if (tx) {
       Object.assign(tx, data);
-      this.saveToLocalStorage('transactions', this.transactions);
+
       dbService.updateTransaction(id, tx);
       this.notify();
     }
@@ -1899,7 +1780,7 @@ class CrmService {
         tx.amount_received = tx.amount_contracted;
         tx.amount_pending = 0;
       }
-      this.saveToLocalStorage('transactions', this.transactions);
+
       dbService.updateTransaction(id, tx);
       this.notify();
     }
@@ -1908,7 +1789,7 @@ class CrmService {
 
   public deleteFinancialTransaction(id: string): void {
     this.transactions = this.transactions.filter((t) => t.id !== id);
-    this.saveToLocalStorage('transactions', this.transactions);
+
     dbService.deleteTransaction(id);
     this.notify();
   }
@@ -1918,13 +1799,24 @@ class CrmService {
     return this.monthlyExpenses;
   }
 
+  private persistExpense(expense: MonthlyExpense, rollback: () => void): void {
+    void dbService.saveMonthlyExpense(expense).then(saved => {
+      if (!saved) throw new Error('Execute 20261009_crm_cloud_only.sql e verifique as permissões de monthly_expenses.');
+    }).catch(error => {
+      rollback(); this.notify();
+      if (typeof window !== 'undefined') window.alert(`Despesa não salva no Supabase: ${error.message}`);
+      else console.error('Despesa não salva no Supabase:', error.message);
+    });
+  }
+
   public addMonthlyExpense(data: Omit<MonthlyExpense, 'id'>): MonthlyExpense {
     const newExpense: MonthlyExpense = {
       ...data,
-      id: `exp-${Date.now()}`,
+      id: crypto.randomUUID(),
     };
     this.monthlyExpenses.unshift(newExpense);
-    this.saveToLocalStorage('monthly_expenses', this.monthlyExpenses);
+    this.persistExpense(newExpense, () => { this.monthlyExpenses = this.monthlyExpenses.filter(exp => exp.id !== newExpense.id); });
+
     this.notify();
     return newExpense;
   }
@@ -1935,8 +1827,10 @@ class CrmService {
   ): MonthlyExpense | undefined {
     const exp = this.monthlyExpenses.find((e) => e.id === id);
     if (exp) {
+      const previous = { ...exp };
       Object.assign(exp, data);
-      this.saveToLocalStorage('monthly_expenses', this.monthlyExpenses);
+      this.persistExpense({ ...exp }, () => Object.assign(exp, previous));
+
       this.notify();
     }
     return exp;
@@ -1945,16 +1839,22 @@ class CrmService {
   public toggleMonthlyExpenseStatus(id: string): MonthlyExpense | undefined {
     const exp = this.monthlyExpenses.find((e) => e.id === id);
     if (exp) {
+      const previous = { ...exp };
       exp.status = exp.status === 'pago' ? 'pendente' : 'pago';
-      this.saveToLocalStorage('monthly_expenses', this.monthlyExpenses);
+      this.persistExpense({ ...exp }, () => Object.assign(exp, previous));
+
       this.notify();
     }
     return exp;
   }
 
   public deleteMonthlyExpense(id: string): void {
+    const removed = this.monthlyExpenses.find(exp => exp.id === id);
     this.monthlyExpenses = this.monthlyExpenses.filter((e) => e.id !== id);
-    this.saveToLocalStorage('monthly_expenses', this.monthlyExpenses);
+    void dbService.deleteMonthlyExpense(id).then(saved => {
+      if (!saved && removed) { this.monthlyExpenses.push(removed); this.notify(); if (typeof window !== 'undefined') window.alert('Não foi possível excluir a despesa no Supabase.'); }
+    }).catch(() => { if (removed) { this.monthlyExpenses.push(removed); this.notify(); } });
+
     this.notify();
   }
 
@@ -2032,7 +1932,7 @@ class CrmService {
     const t = this.tasks.find(tk => tk.id === id);
     if (t) {
       t.status = t.status === 'concluida' ? 'pendente' : 'concluida';
-      this.saveToLocalStorage('tasks', this.tasks);
+
       dbService.updateTask(id, { status: t.status });
       this.notify();
     }
@@ -2048,7 +1948,7 @@ class CrmService {
       id: generatedId,
     };
     this.tasks.unshift(newTask);
-    this.saveToLocalStorage('tasks', this.tasks);
+
     dbService.insertTask(newTask);
     this.notify();
     return newTask;
@@ -2056,7 +1956,7 @@ class CrmService {
 
   public deleteTask(id: string): void {
     this.tasks = this.tasks.filter(t => t.id !== id);
-    this.saveToLocalStorage('tasks', this.tasks);
+
     dbService.deleteTask(id);
     this.notify();
   }

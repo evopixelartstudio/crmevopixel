@@ -17,14 +17,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    // Carregar tema salvo no localStorage ou preferência do sistema
-    const savedTheme = localStorage.getItem('evocrm_theme') as Theme | null;
-    if (savedTheme === 'light' || savedTheme === 'dark') {
-      setThemeState(savedTheme);
-      applyTheme(savedTheme);
-    } else {
-      applyTheme('dark');
-    }
+    applyTheme('dark');
     setMounted(true);
   }, []);
 
@@ -41,7 +34,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const setTheme = (newTheme: Theme) => {
     setThemeState(newTheme);
-    localStorage.setItem('evocrm_theme', newTheme);
     applyTheme(newTheme);
   };
 

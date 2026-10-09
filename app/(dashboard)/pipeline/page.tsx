@@ -1,6 +1,6 @@
 'use client';
 
-import { deletePipelineOpportunities } from '@/lib/services/pipeline-deletion';
+import { isStageOverdue } from '@/lib/services/pipeline-age';
 import { ensureFollowUpStages } from '@/lib/services/pipeline-follow-up-stages';
 import { getPipelineStageMap, isNegotiationStage } from '@/lib/services/pipeline-stages';
 import { hasEnteredPipeline } from '@/lib/services/pipeline-entry';
@@ -59,42 +59,8 @@ interface SupabaseOpportunityRow {
   delivery_days?: number | null;
   created_at?: string;
   updated_at?: string;
+  stage_entered_at?: string;
   leads?: Partial<Lead> | Partial<Lead>[] | null;
-}
-
-const LOST_STORAGE_KEY = 'evocrm_lost_metadata';
-const CLOSING_STORAGE_KEY = 'evocrm_closing_metadata';
-
-function getClosingMetadataMap(): Record<
-  string,
-  { payment_link?: string | null; delivery_days?: number | null }
-> {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem(CLOSING_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function getClosingMetadata(id: string) {
-  const map = getClosingMetadataMap();
-  return map[id] || null;
-}
-
-function saveClosingMetadata(
-  id: string,
-  data: { payment_link?: string | null; delivery_days?: number | null }
-) {
-  if (typeof window === 'undefined') return;
-  try {
-    const map = getClosingMetadataMap();
-    map[id] = { ...map[id], ...data };
-    localStorage.setItem(CLOSING_STORAGE_KEY, JSON.stringify(map));
-  } catch (e) {
-    console.error('Erro ao salvar metadados de fechamento:', e);
-  }
 }
 
 // Gerador padronizado da mensagem formatada para WhatsApp de fechamento de proposta
@@ -131,50 +97,6 @@ ${paymentLink ? `Use este link para realizar a entrada ou pagamento:\n${paymentL
 Assim que confirmar, já iniciamos o processo aqui na EvoPixel!`;
 }
 
-function getLostMetadataMap(): Record<
-  string,
-  { loss_reason?: string | null; loss_notes?: string | null; closed_at?: string | null }
-> {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem(LOST_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function getLostMetadata(id: string) {
-  const map = getLostMetadataMap();
-  return map[id] || null;
-}
-
-function saveLostMetadata(
-  id: string,
-  data: { loss_reason?: string | null; loss_notes?: string | null; closed_at?: string | null }
-) {
-  if (typeof window === 'undefined') return;
-  try {
-    const map = getLostMetadataMap();
-    map[id] = { ...map[id], ...data };
-    localStorage.setItem(LOST_STORAGE_KEY, JSON.stringify(map));
-  } catch (e) {
-    console.error('Erro ao salvar no localStorage:', e);
-  }
-}
-
-function removeLostMetadata(id: string) {
-  if (typeof window === 'undefined') return;
-  try {
-    const map = getLostMetadataMap();
-    delete map[id];
-    localStorage.setItem(LOST_STORAGE_KEY, JSON.stringify(map));
-  } catch (e) {
-    console.error('Erro ao remover do localStorage:', e);
-  }
-}
-
-// Lista oficial dos 6 motivos de perda especificados pelo usuário
 const LOSS_REASONS = [
   'Preço / Fora do orçamento',
   'Fechou com concorrente',
@@ -201,9 +123,11 @@ function formatClosedDate(dateStr?: string | null) {
 }
 
 export default function PipelinePage() {
-  const [selectedOppIds, setSelectedOppIds] = useState<string[]>([]);
-  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
-  const [bulkDeleteError, setBulkDeleteError] = useState<string | null>(null);
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setClockNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [leadsList, setLeadsList] = useState<Lead[]>([]);
@@ -230,8 +154,6 @@ export default function PipelinePage() {
   const [newLeadId, setNewLeadId] = useState<string>('');
   const [newStageId, setNewStageId] = useState<string>('');
   const [newValue, setNewValue] = useState('');
-  const [newProbability, setNewProbability] = useState('50');
-  const [newStatus, setNewStatus] = useState<'aberto' | 'ganho' | 'perdido'>('aberto');
 
   // Modal: Edição e Exclusão
   const [editingOpp, setEditingOpp] = useState<Opportunity | null>(null);
@@ -242,8 +164,6 @@ export default function PipelinePage() {
   const [editLeadId, setEditLeadId] = useState<string>('');
   const [editStageId, setEditStageId] = useState<string>('');
   const [editValue, setEditValue] = useState('');
-  const [editProbability, setEditProbability] = useState('50');
-  const [editStatus, setEditStatus] = useState('aberto');
   const [editWhatsapp, setEditWhatsapp] = useState('');
   const [editInstagram, setEditInstagram] = useState('');
   const [editGoogleBusiness, setEditGoogleBusiness] = useState('');
@@ -320,21 +240,11 @@ export default function PipelinePage() {
       const score = typeof leadObj?.score === 'number' ? leadObj.score : 80;
       const services = Array.isArray(leadObj?.services) ? leadObj.services : [];
 
-      // Local metadata fallback para loss_reason, loss_notes e closed_at
-      const localMeta = getLostMetadata(row.id);
-      const lossReason = row.loss_reason || localMeta?.loss_reason || null;
-      const lossNotesVal = row.loss_notes || localMeta?.loss_notes || null;
-      const closedAt = row.closed_at || localMeta?.closed_at || null;
-
-      // Local metadata fallback para payment_link e delivery_days
-      const closingMeta = getClosingMetadata(row.id);
-      const paymentLink = row.payment_link || closingMeta?.payment_link || null;
-      const deliveryDays =
-        row.delivery_days !== undefined && row.delivery_days !== null
-          ? Number(row.delivery_days)
-          : closingMeta?.delivery_days !== undefined && closingMeta?.delivery_days !== null
-          ? Number(closingMeta.delivery_days)
-          : 7;
+      const lossReason = row.loss_reason || null;
+      const lossNotesVal = row.loss_notes || null;
+      const closedAt = row.closed_at || null;
+      const paymentLink = row.payment_link || null;
+      const deliveryDays = row.delivery_days ?? 7;
 
       return {
         id: row.id,
@@ -357,6 +267,7 @@ export default function PipelinePage() {
         temperature: temp,
         priority: 'alta',
         services,
+        stage_entered_at: row.stage_entered_at,
         created_at: row.created_at,
         updated_at: row.updated_at,
         leads: leadObj || null,
@@ -370,9 +281,6 @@ export default function PipelinePage() {
     setErrorMsg(null);
 
     try {
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('evocrm_opps');
-      }
 
       const supabase = getSupabase();
 
@@ -392,27 +300,11 @@ export default function PipelinePage() {
       }
 
       // Busca oportunidades com suporte a loss_reason, loss_notes, closed_at, payment_link e delivery_days
-      let oppsRes = await supabase
+      const oppsRes = await supabase
         .from('opportunities')
         .select(
-          'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, loss_reason, loss_notes, closed_at, payment_link, delivery_days, leads(*)'
+          '*, leads(*)'
         );
-
-      if (oppsRes.error) {
-        console.warn('Fallback ao consultar opportunities com colunas base:', oppsRes.error.message);
-        oppsRes = await supabase
-          .from('opportunities')
-          .select(
-            'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, loss_reason, loss_notes, closed_at, leads(*)'
-          );
-        if (oppsRes.error) {
-          oppsRes = await supabase
-            .from('opportunities')
-            .select(
-              'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, leads(*)'
-            );
-        }
-      }
 
       if (oppsRes.error) {
         throw new Error(`Erro ao buscar oportunidades: ${oppsRes.error.message}`);
@@ -433,6 +325,9 @@ export default function PipelinePage() {
       const loadedOpps = ((oppsRes.data || []) as SupabaseOpportunityRow[]).map((row) =>
         mapRowToOpportunity(row, stageMap, parsedLeads)
       );
+      if (loadedOpps.some(opp => !opp.stage_entered_at)) {
+        throw new Error('Execute supabase/migrations/20261009_crm_cloud_only.sql para registrar o tempo nas etapas do pipeline.');
+      }
 
       setOpportunities(loadedOpps.filter(opp => hasEnteredPipeline(opp, parsedLeads)));
       crmService.setOpportunitiesFromSupabase(loadedOpps);
@@ -500,6 +395,7 @@ export default function PipelinePage() {
       ...currentOpp,
       stage_id: targetStage.id,
       stage_slug: targetStage.slug,
+      stage_entered_at: new Date().toISOString(),
     };
 
     const nextOpps = opportunities.map((o) => (o.id === oppId ? updatedOpp : o));
@@ -569,20 +465,7 @@ export default function PipelinePage() {
         })
         .eq('id', lostModalOpp.id);
 
-      if (error) {
-        console.warn('Fallback ao atualizar oportunidade como perdida:', error.message);
-        await supabase
-          .from('opportunities')
-          .update({ status: 'perdido' })
-          .eq('id', lostModalOpp.id);
-      }
-
-      // Persistência local segura
-      saveLostMetadata(lostModalOpp.id, {
-        loss_reason: selectedLossReason,
-        loss_notes: lossNotes.trim() || null,
-        closed_at: closedAt,
-      });
+      if (error) throw error;
 
       // Remove imediatamente da listagem ativa das colunas do Kanban
       const updatedOpp: Opportunity = {
@@ -633,18 +516,7 @@ export default function PipelinePage() {
         })
         .eq('id', opp.id);
 
-      if (error) {
-        console.warn('Fallback ao reativar oportunidade:', error.message);
-        await supabase
-          .from('opportunities')
-          .update({
-            status: 'aberto',
-            stage_id: defaultStageId,
-          })
-          .eq('id', opp.id);
-      }
-
-      removeLostMetadata(opp.id);
+      if (error) throw error;
 
       const updatedOpp: Opportunity = {
         ...opp,
@@ -692,43 +564,25 @@ export default function PipelinePage() {
         company_id: null,
         title: newTitle.trim(),
         estimated_value: Number(newValue) || 0,
-        probability: Math.min(100, Math.max(0, Number(newProbability) || 0)),
+        probability: 0,
         status: 'aberto',
       };
       if (newPaymentLink.trim()) payload.payment_link = newPaymentLink.trim();
       if (newDeliveryDays) payload.delivery_days = parseInt(newDeliveryDays, 10) || 7;
 
-      let insertRes = await supabase
+      const insertRes = await supabase
         .from('opportunities')
         .insert([payload])
         .select(
-          'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, payment_link, delivery_days, leads(*)'
+          '*, leads(*)'
         )
         .single();
-
-      if (insertRes.error) {
-        delete payload.payment_link;
-        delete payload.delivery_days;
-        insertRes = await supabase
-          .from('opportunities')
-          .insert([payload])
-          .select(
-            'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, leads(*)'
-          )
-          .single();
-      }
 
       if (insertRes.error) {
         throw insertRes.error;
       }
 
       const createdData = insertRes.data as SupabaseOpportunityRow;
-      if (newPaymentLink.trim() || newDeliveryDays) {
-        saveClosingMetadata(createdData.id, {
-          payment_link: newPaymentLink.trim() || null,
-          delivery_days: parseInt(newDeliveryDays, 10) || 7,
-        });
-      }
 
       const stageMap = new Map<string, PipelineStage>(stages.map((s) => [s.id, s]));
       const createdOpp = mapRowToOpportunity(createdData, stageMap, leadsList);
@@ -752,8 +606,6 @@ export default function PipelinePage() {
       setNewTitle('');
       setNewLeadId('');
       setNewValue('');
-      setNewProbability('50');
-      setNewStatus('aberto');
       setNewPaymentLink('');
       setNewDeliveryDays('7');
       setIsNewOppModalOpen(false);
@@ -774,8 +626,6 @@ export default function PipelinePage() {
     setEditLeadId(opp.lead_id || '');
     setEditStageId(opp.stage_id || stages[0]?.id || '');
     setEditValue(String(opp.estimated_value ?? 0));
-    setEditProbability(String(opp.probability ?? 50));
-    setEditStatus(opp.status || 'aberto');
     setEditWhatsapp(leadData?.whatsapp || leadData?.phone || '');
     setEditInstagram(leadData?.instagram || '');
     setEditGoogleBusiness(leadData?.google_business || '');
@@ -811,42 +661,22 @@ export default function PipelinePage() {
         lead_id: targetLeadId,
         stage_id: editStageId || editingOpp.stage_id,
         estimated_value: Number(editValue) || 0,
-        probability: Math.min(100, Math.max(0, Number(editProbability) || 0)),
-        status: editStatus || 'aberto',
         payment_link: editPaymentLink.trim() || null,
         delivery_days: parseInt(editDeliveryDays, 10) || 7,
       };
 
-      let updateRes = await supabase
+      const updateRes = await supabase
         .from('opportunities')
         .update(payload)
         .eq('id', editingOpp.id)
         .select(
-          'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, payment_link, delivery_days, leads(*)'
+          '*, leads(*)'
         )
         .single();
 
       if (updateRes.error) {
-        delete payload.payment_link;
-        delete payload.delivery_days;
-        updateRes = await supabase
-          .from('opportunities')
-          .update(payload)
-          .eq('id', editingOpp.id)
-          .select(
-            'id, lead_id, stage_id, company_id, title, estimated_value, probability, status, leads(*)'
-          )
-          .single();
-      }
-
-      if (updateRes.error) {
         throw updateRes.error;
       }
-
-      saveClosingMetadata(editingOpp.id, {
-        payment_link: editPaymentLink.trim() || null,
-        delivery_days: parseInt(editDeliveryDays, 10) || 7,
-      });
 
       const stageMap = new Map<string, PipelineStage>(stages.map((s) => [s.id, s]));
       const updatedOpp = mapRowToOpportunity(updateRes.data as SupabaseOpportunityRow, stageMap, leadsList);
@@ -929,7 +759,7 @@ export default function PipelinePage() {
     setOpportunities(nextOpps);
     crmService.setOpportunitiesFromSupabase(nextOpps);
     setDeletingOppId(null);
-    removeLostMetadata(id);
+
 
     const supabase = getSupabase();
     const { error } = await supabase.from('opportunities').delete().eq('id', id);
@@ -1020,60 +850,13 @@ export default function PipelinePage() {
     });
   }, [lostOpportunities, lostReasonFilter, lostSearchTerm]);
 
-  const visibleOpps = showLostView ? filteredLostOpps : activeOpportunities;
-  const selectedVisibleIds = visibleOpps.filter(opp => selectedOppIds.includes(opp.id)).map(opp => opp.id);
-  const allVisibleSelected = visibleOpps.length > 0 && selectedVisibleIds.length === visibleOpps.length;
-  const toggleOppSelection = (id: string) => {
-    setSelectedOppIds(previous => previous.includes(id) ? previous.filter(value => value !== id) : [...previous, id]);
-  };
-  const handleBulkDelete = async () => {
-    if (isBulkDeleting || selectedVisibleIds.length === 0) return;
-    if (!confirm(`Excluir ${selectedVisibleIds.length} oportunidades selecionadas? Esta exclusão é permanente. Os leads vinculados serão mantidos.`)) return;
-    setIsBulkDeleting(true);
-    setBulkDeleteError(null);
-    try {
-      const deletedIds = await deletePipelineOpportunities(selectedVisibleIds);
-      const deleted = new Set(deletedIds);
-      setOpportunities(previous => previous.filter(opp => !deleted.has(opp.id)));
-      crmService.setOpportunitiesFromSupabase(crmService.getOpportunities().filter(opp => !deleted.has(opp.id)));
-      deletedIds.forEach(removeLostMetadata);
-      setSelectedOppIds(previous => previous.filter(id => !deleted.has(id)));
-      if (editingOpp && deleted.has(editingOpp.id)) setEditingOpp(null);
-      if (deletedIds.length !== selectedVisibleIds.length) {
-        setBulkDeleteError('Algumas oportunidades não foram excluídas. Atualize o Pipeline e verifique suas permissões.');
-      }
-    } catch (error) {
-      setBulkDeleteError(error instanceof Error ? error.message : 'Não foi possível excluir as oportunidades. Tente novamente.');
-    } finally {
-      setIsBulkDeleting(false);
-    }
-  };
-  const selectionCheckbox = (opp: Opportunity) => (
-    <input type="checkbox" checked={selectedOppIds.includes(opp.id)}
-      disabled={isBulkDeleting} aria-label={`Selecionar oportunidade ${opp.title}`}
-      onClick={event => event.stopPropagation()} onChange={() => toggleOppSelection(opp.id)}
-      className="h-4 w-4 shrink-0 accent-[#F1F9A1] cursor-pointer" />
-  );
+  const ageIndicator = (opp: Opportunity) => isStageOverdue(opp, clockNow) ? (
+    <span className="pipeline-age-dot h-2 w-2 shrink-0 rounded-full bg-yellow-400" role="img"
+      aria-label="Há mais de 48 horas nesta etapa" title="Há mais de 48 horas nesta etapa" />
+  ) : null;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[rgba(218,241,222,0.08)] bg-[#10201E] px-4 py-3">
-        <label className="flex items-center gap-2 text-sm text-[#E7ECE8]">
-          <input type="checkbox" checked={allVisibleSelected} disabled={isBulkDeleting || visibleOpps.length === 0}
-            className="h-4 w-4 accent-[#F1F9A1]"
-            onChange={() => setSelectedOppIds(allVisibleSelected ? [] : visibleOpps.map(opp => opp.id))} />
-          Selecionar todas ({visibleOpps.length})
-        </label>
-        <span className="text-xs text-[#9BA6A0]" aria-live="polite">{selectedVisibleIds.length} selecionadas</span>
-        {selectedVisibleIds.length > 0 && <>
-          <Button variant="ghost" size="sm" disabled={isBulkDeleting} onClick={() => setSelectedOppIds([])}>Limpar seleção</Button>
-          <Button variant="destructive" size="sm" disabled={isBulkDeleting} onClick={handleBulkDelete}>
-            <Trash2 className="w-4 h-4" />{isBulkDeleting ? 'Excluindo...' : `Excluir selecionadas (${selectedVisibleIds.length})`}
-          </Button>
-        </>}
-        {bulkDeleteError && <p role="alert" className="w-full text-sm text-red-400">{bulkDeleteError}</p>}
-      </div>
-      {/* Cabeçalho */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[rgba(218,241,222,0.06)] pb-5">
         <div>
           <div className="flex items-center gap-2 text-xs font-mono text-[#8EB69B] uppercase tracking-wider mb-1">
@@ -1288,7 +1071,7 @@ export default function PipelinePage() {
                             return (
                               <div
                                 key={opp.id}
-                                draggable={!isBulkDeleting && !selectedOppIds.includes(opp.id)}
+                                draggable
                                 onDragStart={(e) => {
                                   e.dataTransfer.setData('text/plain', opp.id);
                                 }}
@@ -1296,11 +1079,12 @@ export default function PipelinePage() {
                               >
                                 <div>
                                   <div className="flex items-start justify-between gap-1.5 mb-1">
-                                    {selectionCheckbox(opp)}
+
                                     <span className="text-xs font-semibold text-[#E7ECE8] font-heading leading-snug">
                                       {opp.title}
                                     </span>
                                     <div className="flex items-center gap-1 shrink-0">
+                                      {ageIndicator(opp)}
                                       <button
                                         type="button"
                                         onClick={(e) => handleOpenEditModal(opp, e)}
@@ -1439,9 +1223,6 @@ export default function PipelinePage() {
                                   </div>
 
                                   <div className="flex items-center gap-1">
-                                    <span className="text-[10px] font-mono text-[#9BA6A0] mr-1">
-                                      {opp.probability ?? 0}%
-                                    </span>
                                     {stageIndex > 0 && (
                                       <button
                                         type="button"
@@ -1511,7 +1292,7 @@ export default function PipelinePage() {
                         return (
                           <tr key={opp.id} className="hover:bg-[#10201E]/70 transition-colors">
                             <td className="py-3.5 px-4">
-                              {selectionCheckbox(opp)}
+
                               <div className="font-semibold text-[#E7ECE8] font-heading text-sm">
                                 {opp.title}
                               </div>
@@ -1570,6 +1351,7 @@ export default function PipelinePage() {
                             </td>
                             <td className="py-3.5 px-4 text-right">
                               <div className="flex items-center justify-end gap-1.5">
+                                {ageIndicator(opp)}
                                 <button
                                   type="button"
                                   onClick={(e) => handleOpenEditModal(opp, e)}
@@ -1702,7 +1484,7 @@ export default function PipelinePage() {
                           className="hover:bg-[#161B22]/50 transition-colors group"
                         >
                           <td className="py-3.5 px-4">
-                            {selectionCheckbox(opp)}
+
                             <div className="font-semibold text-[#E6EDF3] font-heading text-sm">
                               {opp.title}
                             </div>
@@ -1955,19 +1737,7 @@ export default function PipelinePage() {
               />
             </div>
 
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">
-                Probabilidade (%)
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={newProbability}
-                onChange={(e) => setNewProbability(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
-              />
-            </div>
+
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2096,32 +1866,9 @@ export default function PipelinePage() {
               />
             </div>
 
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">
-                Probabilidade (%)
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={editProbability}
-                onChange={(e) => setEditProbability(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
-              />
-            </div>
 
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Status</label>
-              <select
-                value={editStatus}
-                onChange={(e) => setEditStatus(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
-              >
-                <option value="aberto">Aberto</option>
-                <option value="ganho">Ganho</option>
-                <option value="perdido">Perdido</option>
-              </select>
-            </div>
+
+
           </div>
 
           {editLeadId && (

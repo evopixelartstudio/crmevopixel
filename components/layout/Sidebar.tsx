@@ -50,6 +50,7 @@ export function Sidebar() {
       items: [
         { label: 'Leads', href: '/leads', icon: Users },
         { label: 'Pipeline', href: '/pipeline', icon: Kanban },
+        { label: 'WhatsApp', href: '/whatsapp', icon: MessageSquare },
         { label: 'Rabisco', href: '/mensagens', icon: MessageSquare },
       ],
     },

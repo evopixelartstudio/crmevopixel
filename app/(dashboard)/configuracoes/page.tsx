@@ -305,7 +305,7 @@ export default function ConfiguracoesPage() {
         {saveSuccess && (
           <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#163832] text-[#DAF1DE] border border-[#8EB69B]/40 text-xs animate-in fade-in">
             <CheckCircle2 className="w-4 h-4 text-[#F1F9A1]" />
-            <span>Configurações salvas e ativas!</span>
+            <span>Configurações aplicadas nesta sessão.</span>
           </div>
         )}
       </div>
@@ -473,7 +473,7 @@ export default function ConfiguracoesPage() {
 
               <div className="pt-2 flex justify-end">
                 <Button variant="primary" size="sm" className="text-xs" onClick={handleSaveProfile}>
-                  Salvar Perfil
+                  Aplicar Perfil
                 </Button>
               </div>
             </div>
@@ -615,7 +615,7 @@ export default function ConfiguracoesPage() {
             </div>
 
             <div className="p-3 rounded-lg bg-[var(--evo-card)] border border-[var(--evo-border)] text-[11px] text-[var(--evo-muted)]">
-              💡 As alterações de cores são aplicadas instantaneamente em toda a interface do CRM e salvas no seu navegador.
+              As alterações de cores são aplicadas nesta sessão. Nenhuma preferência é salva no navegador.
             </div>
           </div>
         </div>
@@ -657,7 +657,7 @@ export default function ConfiguracoesPage() {
               onClick={handleSaveAiConfig}
             >
               <Save className="w-3.5 h-3.5" />
-              <span>Salvar Chaves de IA</span>
+              <span>Aplicar Chaves de IA nesta sessão</span>
             </Button>
           </div>
         </div>

@@ -15,6 +15,7 @@ import {
   TaskItem,
   FinancialTransaction,
   Service,
+  MonthlyExpense,
 } from '@/types/database';
 
 function isValidUUID(str?: string | null): boolean {
@@ -107,6 +108,24 @@ export function parseLeadFromSupabase(row: any): Lead {
 }
 
 export class DatabaseService {
+  public async getMonthlyExpenses(): Promise<MonthlyExpense[] | null> {
+    if (!isSupabaseConfigured()) return null;
+    const { data, error } = await getSupabase().from('monthly_expenses').select('*');
+    if (error) { console.error('Erro ao carregar despesas do Supabase:', error.message); return null; }
+    return data as MonthlyExpense[];
+  }
+
+  public async saveMonthlyExpense(expense: MonthlyExpense): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    const { error } = await getSupabase().from('monthly_expenses').upsert(expense, { onConflict: 'id' });
+    return !error;
+  }
+
+  public async deleteMonthlyExpense(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    const { error } = await getSupabase().from('monthly_expenses').delete().eq('id', id);
+    return !error;
+  }
   // ============================================================================
   // CLIENTES
   // ============================================================================
@@ -475,7 +494,7 @@ export class DatabaseService {
               : [],
           created_at: row.created_at,
           updated_at: row.updated_at,
-          stage_entered_at: row.updated_at || row.created_at,
+          stage_entered_at: row.stage_entered_at,
           leads: parsedLead,
         } as Opportunity;
       });

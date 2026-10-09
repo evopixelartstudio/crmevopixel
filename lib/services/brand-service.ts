@@ -107,28 +107,11 @@ class BrandService {
     });
   }
 
-  public load(): BrandConfig {
-    if (typeof window === 'undefined') return this.config;
-    try {
-      const stored = localStorage.getItem('evocrm_brand_config');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        this.config = { ...DEFAULT_BRAND_CONFIG, ...parsed };
-      }
-    } catch (e) {
-      console.warn('Erro ao carregar configurações de marca:', e);
-    }
-    return this.config;
-  }
+  public load(): BrandConfig { return this.config; }
 
   public saveConfig(newConfig: Partial<BrandConfig>): BrandConfig {
     this.config = { ...this.config, ...newConfig };
     if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('evocrm_brand_config', JSON.stringify(this.config));
-      } catch (e) {
-        console.error('Erro ao salvar marca no localStorage:', e);
-      }
       this.applyTheme();
     }
     this.notify();
@@ -151,9 +134,7 @@ class BrandService {
   public resetBrand(): BrandConfig {
     this.config = { ...DEFAULT_BRAND_CONFIG };
     if (typeof window !== 'undefined') {
-      try {
-        localStorage.removeItem('evocrm_brand_config');
-      } catch (e) {}
+
       this.applyTheme();
     }
     this.notify();

@@ -20,11 +20,15 @@ const inserted = [];
 const updates = [];
 let remoteLeads = [];
 let failLeadInsert = false;
+let stageSaved = false;
+let stageWrites = 0;
 const dbService = new Proxy({}, {
   get: (_, key) => async (...args) => {
     if (key === 'getLeads') return remoteLeads;
     if (key === 'insertLead') { inserted.push(args[0]); return failLeadInsert ? null : args[0]; }
     if (key === 'updateHistoricalProject') { updates.push(args); return true; }
+    if (key === 'saveMonthlyExpense' || key === 'deleteMonthlyExpense') return true;
+    if (key === 'updateOpportunityStage') { stageWrites++; return stageSaved; }
     return null;
   },
 });
@@ -32,6 +36,19 @@ const dbPath = require.resolve('../lib/supabase/db-service.ts');
 require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { dbService } };
 const { crmService } = require('../lib/services/crm-service.ts');
 const { hasEnteredPipeline } = require('../lib/services/pipeline-entry.ts');
+
+test('confirmed stage change preserves state on failure and persists only once on success', async () => {
+  const opportunity = crmService.addOpportunity({ lead_id: null, lead_name: 'Contato', company_name: 'Empresa', stage_slug: 'primeiro_contato', title: 'Teste WhatsApp', estimated_value: 0, probability: 0, score: 0, temperature: 'frio', priority: 'baixa', services: [] });
+  stageWrites = 0;
+  await assert.rejects(crmService.updateOpportunityStageConfirmed(opportunity.id, 'proposta'), /Supabase/);
+  assert.equal(opportunity.stage_slug, 'primeiro_contato');
+  stageSaved = true;
+  stageWrites = 0;
+  await crmService.updateOpportunityStageConfirmed(opportunity.id, 'proposta');
+  assert.equal(opportunity.stage_slug, 'proposta');
+  assert.equal(stageWrites, 1);
+  stageSaved = false;
+});
 
 test('new leads stay outside first contact until explicitly contacted, including imported leads', () => {
   const lead = { id: 'uncontacted', status: 'novo' };

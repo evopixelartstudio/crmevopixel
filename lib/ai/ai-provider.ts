@@ -52,27 +52,13 @@ class AIProviderService {
     }
   }
 
-  public loadConfig(): AIProviderConfig {
-    if (typeof window === 'undefined') return this.config;
-    try {
-      const saved = localStorage.getItem('evocrm_ai_config');
-      if (saved) {
-        this.config = { ...DEFAULT_AI_CONFIG, ...JSON.parse(saved) };
-      }
-    } catch {
-      this.config = { ...DEFAULT_AI_CONFIG };
-    }
-    return this.config;
-  }
+  public loadConfig(): AIProviderConfig { return this.config; }
 
   public saveConfig(newConfig: Partial<AIProviderConfig>): AIProviderConfig {
     this.config = {
       ...this.config,
       ...newConfig,
     };
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('evocrm_ai_config', JSON.stringify(this.config));
-    }
     return this.config;
   }
 

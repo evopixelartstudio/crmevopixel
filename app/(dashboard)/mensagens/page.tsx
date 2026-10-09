@@ -72,9 +72,6 @@ const PEN_COLORS = [
   { name: 'Azul', value: '#58A6FF' },
 ];
 
-const STORAGE_KEY_CARDS = 'evocrm_board_cards_v1';
-const STORAGE_KEY_CONNECTIONS = 'evocrm_board_connections_v1';
-const STORAGE_KEY_STROKES = 'evocrm_board_strokes_v1';
 
 // Modelo inicial inspirado na referência de quadro interativo (Miro)
 const INITIAL_CARDS: BoardCard[] = [
@@ -179,6 +176,8 @@ const INITIAL_CONNECTIONS: BoardConnection[] = [
 ];
 
 export default function RabiscoPage() {
+  const [accessKey, setAccessKey] = useState('');
+  const [accessDraft, setAccessDraft] = useState('');
   // Dados do Quadro
   const [cards, setCards] = useState<BoardCard[]>([]);
   const [connections, setConnections] = useState<BoardConnection[]>([]);
@@ -239,26 +238,15 @@ export default function RabiscoPage() {
   const saveRevision = useRef(0);
 
   useEffect(() => {
+    if (!accessKey) return;
     let cancelled = false;
     const load = async () => {
       try {
-        let board = await loadRabiscoBoard();
+        let board = await loadRabiscoBoard(accessKey);
         if (cancelled) return;
-        const migratedLegacy = !board;
         if (!board) {
-          const readLegacy = <T,>(key: string, fallback: T[]): T[] => {
-            const raw = localStorage.getItem(key);
-            if (!raw) return fallback;
-            const value = JSON.parse(raw);
-            if (!Array.isArray(value)) throw new Error('Backup local inválido. Exporte ou recupere seus dados antes de continuar.');
-            return value as T[];
-          };
-          board = {
-            cards: readLegacy(STORAGE_KEY_CARDS, INITIAL_CARDS),
-            connections: readLegacy(STORAGE_KEY_CONNECTIONS, INITIAL_CONNECTIONS),
-            strokes: readLegacy<BoardStroke>(STORAGE_KEY_STROKES, []),
-          };
-          await saveRabiscoBoard(board);
+          board = { cards: INITIAL_CARDS, connections: INITIAL_CONNECTIONS, strokes: [] };
+          await saveRabiscoBoard(board, accessKey);
         }
         if (cancelled) return;
         boardRef.current = board;
@@ -267,10 +255,7 @@ export default function RabiscoPage() {
         setStrokes(board.strokes);
         setBoardReady(true);
         setSaveStatus('saved');
-        // Remover o legado somente depois da confirmação do Supabase.
-        if (migratedLegacy) {
-          [STORAGE_KEY_CARDS, STORAGE_KEY_CONNECTIONS, STORAGE_KEY_STROKES].forEach(key => localStorage.removeItem(key));
-        }
+
       } catch (error) {
         if (cancelled) return;
         setStorageError(error instanceof Error ? error.message : 'Não foi possível carregar o Rabisco.');
@@ -279,7 +264,7 @@ export default function RabiscoPage() {
     };
     void load();
     return () => { cancelled = true; };
-  }, []);
+  }, [accessKey]);
 
   const persistBoard = (patch: Partial<RabiscoBoard>) => {
     if (!boardReady) return;
@@ -291,7 +276,7 @@ export default function RabiscoPage() {
     // Serializar gravações para uma resposta lenta não sobrescrever uma edição recente.
     saveQueue.current = saveQueue.current.then(async () => {
       try {
-        await saveRabiscoBoard(snapshot);
+        await saveRabiscoBoard(snapshot, accessKey);
         if (revision === saveRevision.current) setSaveStatus('saved');
       } catch (error) {
         if (revision === saveRevision.current) {
@@ -564,7 +549,7 @@ export default function RabiscoPage() {
     }
 
     if (draggingCardId) {
-      // Salvar estado final no localStorage
+      // Salvar estado final no Supabase
       saveCards(cards);
       setDraggingCardId(null);
     }
@@ -626,12 +611,18 @@ export default function RabiscoPage() {
   return (
     <div className="relative w-full h-full min-h-0 bg-[#050706] overflow-hidden select-none flex flex-col font-sans">
       {!boardReady && <div className="absolute inset-0 z-50 bg-[#07100F] flex flex-col items-center justify-center gap-3 p-6 text-[#E7ECE8]">
-        <p role="status">{storageError || 'Carregando Rabisco do Supabase...'}</p>
+        {!accessKey ? <form className="flex max-w-sm flex-col gap-3" onSubmit={event => { event.preventDefault(); setAccessKey(accessDraft); }}>
+          <h1 className="text-xl font-semibold">Rabisco</h1>
+          <label htmlFor="rabisco-access">Chave de acesso do CRM</label>
+          <input id="rabisco-access" type="password" autoComplete="off" required value={accessDraft} onChange={event => setAccessDraft(event.target.value)} className="rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.15)] px-3 py-2 focus-visible:outline focus-visible:outline-[#F1F9A1]" />
+          <button type="submit" className="rounded-xl bg-[#F1F9A1] px-4 py-2 text-[#07100F]">Abrir quadro</button>
+        </form> : <p role="status">{storageError || 'Carregando Rabisco do Supabase...'}</p>}
         {storageError && <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-xl bg-[#10201E]">Tentar novamente</button>}
       </div>}
       {boardReady && <div className="absolute bottom-3 left-20 z-40 max-w-[calc(100%-6rem)] rounded-xl bg-[#10201E] px-3 py-2 text-xs text-[#E7ECE8]" role="status">
         {saveStatus === 'saved' ? 'Salvo no Supabase' : saveStatus === 'saving' ? 'Salvando no Supabase...' : storageError}
         {saveStatus === 'error' && <button onClick={() => persistBoard({})} className="ml-3 underline">Tentar salvar novamente</button>}
+
       </div>}
       {/* ========================================================================= */}
       {/* 1. BARRA SUPERIOR (HEADER ESTILO MIRO / EVOCRM)                           */}
