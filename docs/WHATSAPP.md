@@ -14,16 +14,15 @@ EVOLUTION_API_URL=https://evolution-go-nk3u.srv1956040.hstgr.cloud
 EVOLUTION_API_KEY=token-da-instancia-evolution-go
 EVOLUTION_INSTANCE=evocrm
 EVOLUTION_WEBHOOK_URL=https://crmevopixel.cloud/api/whatsapp/webhook
-CRM_ACCESS_TOKEN=uma-chave-aleatoria-longa-exclusiva
 SUPABASE_SERVICE_ROLE_KEY=chave-service-role-do-supabase
 ```
 
 4. Mantenha `NEXT_PUBLIC_SUPABASE_URL` e `NEXT_PUBLIC_SUPABASE_ANON_KEY` configuradas. Recrie o container do CRM após atualizar o `.env`. As variáveis da integração são repassadas pelo Docker Compose.
-5. Abra **WhatsApp**, informe `CRM_ACCESS_TOKEN` e clique em **Conectar / renovar QR Code**. O CRM configura o webhook da instância e assina `MESSAGE`, `SEND_MESSAGE` e `CONNECTION`. Se ela já estiver conectada, a configuração do recebimento é atualizada sem pedir QR Code. Recomenda-se uma instância dedicada: esta operação substitui a configuração de eventos/webhook daquela instância.
+5. Abra **WhatsApp**. O CRM verifica automaticamente a conexão. Clique em **Configurar recebimento** quando conectado, ou **Conectar / renovar QR Code** quando desconectado. O CRM configura o webhook da instância e assina `MESSAGE`, `SEND_MESSAGE` e `CONNECTION`. Se ela já estiver conectada, a configuração do recebimento é atualizada sem pedir QR Code. Recomenda-se uma instância dedicada: esta operação substitui a configuração de eventos/webhook daquela instância.
 6. Quando houver QR Code, abra no celular **Aparelhos conectados → Conectar aparelho**. Se o QR ainda não estiver pronto, aguarde alguns segundos e tente novamente.
 7. Cadastre números com DDD nos clientes/leads. Selecione um contato para ver as últimas 100 mensagens registradas no Supabase. O CRM consulta o banco a cada 5 segundos enquanto a conversa está aberta.
 
-`EVOLUTION_API_KEY` e `SUPABASE_SERVICE_ROLE_KEY` ficam somente no servidor; nunca use o prefixo `NEXT_PUBLIC` nelas. `CRM_ACCESS_TOKEN` protege WhatsApp e Rabisco e fica somente na memória da tela. O nome antigo `CRM_WHATSAPP_ACCESS_TOKEN` ainda é aceito quando `CRM_ACCESS_TOKEN` está vazio. O webhook valida `instanceToken` contra o token configurado e persiste a mensagem antes de confirmar o recebimento. As tabelas de conversas e Rabisco não são abertas à chave pública anônima do Supabase.
+`EVOLUTION_API_KEY` e `SUPABASE_SERVICE_ROLE_KEY` ficam somente no servidor; nunca use o prefixo `NEXT_PUBLIC` nelas. WhatsApp e Rabisco abrem diretamente, sem pedir uma chave adicional. Seus endpoints seguem o acesso aberto atual do CRM. O webhook continua validando `instanceToken` contra o token configurado e persiste a mensagem antes de confirmar o recebimento. As tabelas de conversas e Rabisco não são abertas à chave pública anônima do Supabase.
 
 ## Conversas e pipeline
 
@@ -39,7 +38,7 @@ Contatos com o mesmo número são agrupados. Oportunidades são vinculadas pelo 
 - Receber uma mensagem de um contato cadastrado e verificar sua exibição.
 - Enviar um texto e verificar a chegada no celular do destinatário.
 - Alterar a etapa de uma oportunidade vinculada e conferir no pipeline após recarregar.
-- Testar chave inválida e indisponibilidade da Evolution/Supabase.
+- Testar token inválido no webhook e indisponibilidade da Evolution/Supabase.
 
 O Swagger e `/server/ok` foram acessados sem credenciais. A conexão real, o webhook e o envio precisam ser validados após configurar os tokens e aplicar o SQL. Nenhuma mensagem de teste foi enviada a clientes.
 

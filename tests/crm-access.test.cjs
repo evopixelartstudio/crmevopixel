@@ -12,20 +12,13 @@ compiled.require = name => name === '@supabase/supabase-js' ? { createClient: (u
 compiled._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText, filename);
-const { secretsMatch, hasCrmAccess, cloudDatabase } = compiled.exports;
+const { secretsMatch, cloudDatabase } = compiled.exports;
 
 test('access rejects missing/mismatched tokens including multibyte lengths', () => {
   assert.equal(secretsMatch('token', undefined), false);
   assert.equal(secretsMatch('short', 'longer-secret'), false);
   assert.equal(secretsMatch('å', 'a'), false);
   assert.equal(secretsMatch('secret', 'secret'), true);
-});
-
-test('server authorizes bearer access using the configured CRM key', () => {
-  process.env.CRM_ACCESS_TOKEN = 'test-crm-key';
-  assert.equal(hasCrmAccess(new Request('https://crm.test')), false);
-  assert.equal(hasCrmAccess(new Request('https://crm.test', { headers: { Authorization: 'Bearer test-crm-key' } })), true);
-  delete process.env.CRM_ACCESS_TOKEN;
 });
 
 test('cloud storage never substitutes the public anon key for the server credential', () => {

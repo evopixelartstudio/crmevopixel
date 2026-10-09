@@ -25,23 +25,23 @@ const { loadRabiscoBoard, saveRabiscoBoard } = storage.exports;
 test('database failure rejects without reading or writing browser storage', async () => {
   ok = false;
   result = { error: 'Execute 20261009_crm_cloud_only.sql' };
-  await assert.rejects(loadRabiscoBoard('access-key'), /20261009_crm_cloud_only.sql/);
-  await assert.rejects(saveRabiscoBoard({ cards: [], connections: [], strokes: [] }, 'access-key'), /20261009_crm_cloud_only.sql/);
+  await assert.rejects(loadRabiscoBoard(), /20261009_crm_cloud_only.sql/);
+  await assert.rejects(saveRabiscoBoard({ cards: [], connections: [], strokes: [] }), /20261009_crm_cloud_only.sql/);
 });
 
-test('protected backend requires the supplied access key', async () => {
+test('board loads directly without an access key or browser persistence', async () => {
   ok = true; result = null;
-  assert.equal(await loadRabiscoBoard('access-key'), null);
-  assert.equal(lastRequest.headers.Authorization, 'Bearer access-key');
+  assert.equal(await loadRabiscoBoard(), null);
+  assert.equal(lastRequest.headers, undefined);
   assert.equal(lastRequest.cache, 'no-store');
 });
 
 test('save requires a positive cloud confirmation', async () => {
   ok = true; result = {};
   const board = { cards: [], connections: [], strokes: [] };
-  await assert.rejects(saveRabiscoBoard(board, 'access-key'), /confirmou/);
+  await assert.rejects(saveRabiscoBoard(board), /confirmou/);
   result = { saved: true };
-  await saveRabiscoBoard(board, 'access-key');
+  await saveRabiscoBoard(board);
   assert.equal(lastRequest.method, 'PUT');
   assert.deepEqual(JSON.parse(lastRequest.body), board);
 });

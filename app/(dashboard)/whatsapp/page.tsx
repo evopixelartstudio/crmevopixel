@@ -15,8 +15,6 @@ const control = 'rounded-lg border border-[var(--evo-border)] bg-[var(--evo-surf
 
 export default function WhatsAppPage() {
   useCrmSync();
-  const [token, setToken] = useState('');
-  const [unlocked, setUnlocked] = useState(false);
   const [state, setState] = useState('');
   const [qr, setQr] = useState('');
   const [selected, setSelected] = useState('');
@@ -51,11 +49,11 @@ export default function WhatsAppPage() {
   const visible = [...contacts.values()].filter(c => `${c.name} ${c.company} ${c.phone}`.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR')));
 
   const api = useCallback(async (action: string, extra = {}) => {
-    const response = await fetch('/api/whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ action, ...extra }) });
+    const response = await fetch('/api/whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...extra }) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Não foi possível acessar o WhatsApp.');
     return data;
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -64,7 +62,6 @@ export default function WhatsAppPage() {
   }, []);
 
   useEffect(() => {
-    if (!unlocked) return;
     let alive = true;
     const check = async () => {
       try {
@@ -75,12 +72,12 @@ export default function WhatsAppPage() {
     void check();
     const timer = setInterval(check, 10000);
     return () => { alive = false; clearInterval(timer); };
-  }, [unlocked, api]);
+  }, [api]);
 
   useEffect(() => {
     const revision = ++generation.current;
     setMessages([]); setText(''); setOppId('');
-    if (!selected || !unlocked || state !== 'open') { setLoading(false); return; }
+    if (!selected || state !== 'open') { setLoading(false); return; }
     let alive = true, fetching = false;
     const load = async () => {
       if (fetching) return;
@@ -94,14 +91,14 @@ export default function WhatsAppPage() {
     setLoading(true); void load();
     const timer = setInterval(load, 5000);
     return () => { alive = false; clearInterval(timer); };
-  }, [selected, unlocked, state, api]);
+  }, [selected, state, api]);
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'nearest' }); }, [messages]);
 
   async function connect() {
     setBusy(true); setError('');
     try {
       const data = await api('status');
-      setUnlocked(true); setState(data.instance?.state ?? 'close');
+      setState(data.instance?.state ?? 'close');
       if (data.provider === 'go' || data.instance?.state !== 'open') {
         const result = await api('connect');
         if (result.instance?.state === 'open') { setState('open'); setQr(''); setNotice('Recebimento de mensagens configurado.'); return; }
@@ -139,12 +136,10 @@ export default function WhatsAppPage() {
   return <div className="space-y-4">
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div><h1 className="text-2xl font-semibold">WhatsApp</h1><p className="text-sm text-[var(--evo-muted)]">Converse com seus contatos e acompanhe as oportunidades.</p></div>
-      <span role="status" className="text-sm text-[var(--evo-support)]">{state === 'open' ? 'Conectado' : unlocked ? 'Aguardando conexão' : 'Não conectado'}</span>
+      <span role="status" className="text-sm text-[var(--evo-support)]">{state === 'open' ? 'Conectado' : !state ? 'Verificando conexão…' : 'Não conectado'}</span>
     </header>
     <div className="flex flex-wrap items-end gap-3">
-      <label className="text-sm">Chave de acesso<input type="password" autoComplete="off" value={token} disabled={unlocked} onChange={e => setToken(e.target.value)} className={`${control} ml-2`} /></label>
-      <button className={control} onClick={connect} disabled={busy || !token}>{busy ? 'Aguarde…' : state === 'open' ? 'Configurar recebimento' : 'Conectar / renovar QR Code'}</button>
-      {unlocked && <button className={control} onClick={() => { setUnlocked(false); setState(''); setQr(''); setToken(''); setMessages([]); }}>Bloquear acesso</button>}
+      <button className={control} onClick={connect} disabled={busy}>{busy ? 'Aguarde…' : state === 'open' ? 'Configurar recebimento' : 'Conectar / renovar QR Code'}</button>
     </div>
     {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
     {notice && <p role="status" className="text-sm text-[var(--evo-support)]">{notice}</p>}
@@ -167,7 +162,7 @@ export default function WhatsAppPage() {
             {loading ? <p className="text-sm text-[var(--evo-muted)]">Carregando mensagens…</p> : !messages.length && <p className="text-sm text-[var(--evo-muted)]">{state !== 'open' ? 'Conecte o WhatsApp para carregar a conversa.' : 'Nenhuma mensagem sincronizada para este contato.'}</p>}
             {messages.map(m => <div key={m.id} className={`flex ${m.fromMe ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] rounded-xl px-4 py-2 ${m.fromMe ? 'bg-[var(--evo-surface2)]' : 'bg-[var(--evo-surface)]'}`}><p className="whitespace-pre-wrap break-words text-sm">{m.text}</p><p className="mt-1 text-right text-xs text-[var(--evo-muted)]">{m.timestamp ? new Date(m.timestamp * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</p></div></div>)}<div ref={bottom} />
           </div>
-          <form onSubmit={send} className="flex items-end gap-2 border-t border-[var(--evo-border)] p-3"><label className="sr-only" htmlFor="message-text">Mensagem</label><textarea id="message-text" rows={2} maxLength={4096} value={text} onChange={e => setText(e.target.value)} placeholder="Escreva sua mensagem" disabled={!unlocked || state !== 'open' || busy} className={`${control} min-w-0 flex-1 resize-none`} /><button type="submit" disabled={busy || !text.trim() || state !== 'open'} className={`${control} flex items-center gap-2`}><Send size={16} />Enviar</button></form>
+          <form onSubmit={send} className="flex items-end gap-2 border-t border-[var(--evo-border)] p-3"><label className="sr-only" htmlFor="message-text">Mensagem</label><textarea id="message-text" rows={2} maxLength={4096} value={text} onChange={e => setText(e.target.value)} placeholder="Escreva sua mensagem" disabled={state !== 'open' || busy} className={`${control} min-w-0 flex-1 resize-none`} /><button type="submit" disabled={busy || !text.trim() || state !== 'open'} className={`${control} flex items-center gap-2`}><Send size={16} />Enviar</button></form>
         </> : <div className="m-auto p-6 text-center text-[var(--evo-muted)]"><MessageSquare className="mx-auto mb-3" /><p>Selecione um contato para abrir a conversa.</p></div>}
       </section>
     </div>

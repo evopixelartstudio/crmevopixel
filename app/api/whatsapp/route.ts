@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { formatWhatsAppNumber } from '@/lib/utils/whatsapp';
 import { normalizeWhatsAppMessages } from '@/lib/services/whatsapp-messages';
-import { cloudDatabase, hasCrmAccess } from '@/lib/server/crm-access';
+import { cloudDatabase } from '@/lib/server/crm-access';
 import { normalizeGoStatus, normalizeGoQr } from '@/lib/services/evolution-go';
 
 export const runtime = 'nodejs';
@@ -23,8 +23,6 @@ async function evolution(path: string, body?: unknown) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!process.env.CRM_ACCESS_TOKEN && !process.env.CRM_WHATSAPP_ACCESS_TOKEN) return NextResponse.json({ error: 'Configure CRM_ACCESS_TOKEN no servidor.' }, { status: 503 });
-  if (!hasCrmAccess(request)) return NextResponse.json({ error: 'Chave de acesso inválida.' }, { status: 401 });
   try {
     const body = await request.json();
     const instance = encodeURIComponent(process.env.EVOLUTION_INSTANCE ?? '');

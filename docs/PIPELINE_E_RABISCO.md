@@ -4,7 +4,7 @@
 
 O Rabisco lê e salva exclusivamente no Supabase, através de `/api/rabisco`. Não existe fallback local nem leitura de backups do navegador. Se o banco não estiver configurado, a tela informa o problema e não confirma o salvamento.
 
-Para habilitar o quadro compartilhado, execute todo o arquivo `supabase/migrations/20261009_crm_cloud_only.sql` no SQL Editor. Configure `SUPABASE_SERVICE_ROLE_KEY` e `CRM_ACCESS_TOKEN` apenas no servidor do CRM, recrie o container e abra Rabisco com a chave de acesso. A chave permanece em memória e não é salva no navegador. O backend controla o acesso; não é necessário liberar a tabela para usuários anônimos.
+Para habilitar o quadro compartilhado, execute todo o arquivo `supabase/migrations/20261009_crm_cloud_only.sql` no SQL Editor. Configure `SUPABASE_SERVICE_ROLE_KEY` apenas no servidor do CRM e recrie o container. O Rabisco abre diretamente e carrega o quadro do Supabase pelo backend, seguindo o acesso aberto atual do CRM; não é necessário liberar a tabela para usuários anônimos.
 
 Backups locais antigos não foram apagados, importados nem usados automaticamente. Se houver trabalho nesses backups, preserve uma exportação antes de removê-los manualmente.
 

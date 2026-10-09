@@ -6,15 +6,15 @@ export interface RabiscoBoard {
   strokes: BoardStroke[];
 }
 
-export async function loadRabiscoBoard(accessKey: string): Promise<RabiscoBoard | null> {
-  const response = await fetch('/api/rabisco', { headers: { Authorization: `Bearer ${accessKey}` }, cache: 'no-store' });
+export async function loadRabiscoBoard(): Promise<RabiscoBoard | null> {
+  const response = await fetch('/api/rabisco', { cache: 'no-store' });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Não foi possível carregar o Rabisco.');
   return data;
 }
 
-export async function saveRabiscoBoard(board: RabiscoBoard, accessKey: string): Promise<void> {
-  const response = await fetch('/api/rabisco', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessKey}` }, body: JSON.stringify(board) });
+export async function saveRabiscoBoard(board: RabiscoBoard): Promise<void> {
+  const response = await fetch('/api/rabisco', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(board) });
   const data = await response.json();
   if (!response.ok || data.saved !== true) throw new Error(data.error || 'O Supabase não confirmou o salvamento.');
 }

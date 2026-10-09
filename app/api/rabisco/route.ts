@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
-import { cloudDatabase, hasCrmAccess } from '@/lib/server/crm-access';
+import { cloudDatabase } from '@/lib/server/crm-access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
-  if (!hasCrmAccess(request)) return NextResponse.json({ error: 'Informe a chave de acesso do CRM.' }, { status: 401 });
+export async function GET() {
   try {
     const { data, error } = await cloudDatabase().from('rabisco_boards').select('cards, connections, strokes').eq('id', 'principal').maybeSingle();
     if (error) throw new Error(error.code === 'PGRST205' || error.code === '42P01' ? 'Execute supabase/migrations/20261009_crm_cloud_only.sql no SQL Editor do Supabase.' : 'Não foi possível carregar o Rabisco do Supabase.');
@@ -14,7 +13,6 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  if (!hasCrmAccess(request)) return NextResponse.json({ error: 'Chave de acesso inválida.' }, { status: 401 });
   try {
     const board = await request.json();
     if (!board || ![board.cards, board.connections, board.strokes].every(Array.isArray)) return NextResponse.json({ error: 'Quadro inválido.' }, { status: 400 });

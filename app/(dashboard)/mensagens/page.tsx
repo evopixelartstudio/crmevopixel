@@ -176,8 +176,6 @@ const INITIAL_CONNECTIONS: BoardConnection[] = [
 ];
 
 export default function RabiscoPage() {
-  const [accessKey, setAccessKey] = useState('');
-  const [accessDraft, setAccessDraft] = useState('');
   // Dados do Quadro
   const [cards, setCards] = useState<BoardCard[]>([]);
   const [connections, setConnections] = useState<BoardConnection[]>([]);
@@ -238,15 +236,14 @@ export default function RabiscoPage() {
   const saveRevision = useRef(0);
 
   useEffect(() => {
-    if (!accessKey) return;
     let cancelled = false;
     const load = async () => {
       try {
-        let board = await loadRabiscoBoard(accessKey);
+        let board = await loadRabiscoBoard();
         if (cancelled) return;
         if (!board) {
           board = { cards: INITIAL_CARDS, connections: INITIAL_CONNECTIONS, strokes: [] };
-          await saveRabiscoBoard(board, accessKey);
+          await saveRabiscoBoard(board);
         }
         if (cancelled) return;
         boardRef.current = board;
@@ -264,7 +261,7 @@ export default function RabiscoPage() {
     };
     void load();
     return () => { cancelled = true; };
-  }, [accessKey]);
+  }, []);
 
   const persistBoard = (patch: Partial<RabiscoBoard>) => {
     if (!boardReady) return;
@@ -276,7 +273,7 @@ export default function RabiscoPage() {
     // Serializar gravações para uma resposta lenta não sobrescrever uma edição recente.
     saveQueue.current = saveQueue.current.then(async () => {
       try {
-        await saveRabiscoBoard(snapshot, accessKey);
+        await saveRabiscoBoard(snapshot);
         if (revision === saveRevision.current) setSaveStatus('saved');
       } catch (error) {
         if (revision === saveRevision.current) {
@@ -611,12 +608,7 @@ export default function RabiscoPage() {
   return (
     <div className="relative w-full h-full min-h-0 bg-[#050706] overflow-hidden select-none flex flex-col font-sans">
       {!boardReady && <div className="absolute inset-0 z-50 bg-[#07100F] flex flex-col items-center justify-center gap-3 p-6 text-[#E7ECE8]">
-        {!accessKey ? <form className="flex max-w-sm flex-col gap-3" onSubmit={event => { event.preventDefault(); setAccessKey(accessDraft); }}>
-          <h1 className="text-xl font-semibold">Rabisco</h1>
-          <label htmlFor="rabisco-access">Chave de acesso do CRM</label>
-          <input id="rabisco-access" type="password" autoComplete="off" required value={accessDraft} onChange={event => setAccessDraft(event.target.value)} className="rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.15)] px-3 py-2 focus-visible:outline focus-visible:outline-[#F1F9A1]" />
-          <button type="submit" className="rounded-xl bg-[#F1F9A1] px-4 py-2 text-[#07100F]">Abrir quadro</button>
-        </form> : <p role="status">{storageError || 'Carregando Rabisco do Supabase...'}</p>}
+        <p role="status">{storageError || 'Carregando Rabisco...'}</p>
         {storageError && <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-xl bg-[#10201E]">Tentar novamente</button>}
       </div>}
       {boardReady && <div className="absolute bottom-3 left-20 z-40 max-w-[calc(100%-6rem)] rounded-xl bg-[#10201E] px-3 py-2 text-xs text-[#E7ECE8]" role="status">
