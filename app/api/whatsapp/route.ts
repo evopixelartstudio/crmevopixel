@@ -24,6 +24,8 @@ async function evolution(path: string, body?: unknown) {
 
 export async function POST(request: NextRequest) {
   try {
+    const missing = ['EVOLUTION_API_URL', 'EVOLUTION_API_KEY', 'EVOLUTION_INSTANCE'].filter(name => !process.env[name]?.trim());
+    if (missing.length) return NextResponse.json({ error: 'A integração do WhatsApp ainda não foi configurada no servidor.', code: 'CONFIG_MISSING', missing }, { status: 503 });
     const body = await request.json();
     const instance = encodeURIComponent(process.env.EVOLUTION_INSTANCE ?? '');
     const go = process.env.EVOLUTION_PROVIDER === 'go';

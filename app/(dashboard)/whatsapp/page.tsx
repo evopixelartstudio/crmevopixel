@@ -22,6 +22,7 @@ export default function WhatsAppPage() {
   const [messages, setMessages] = useState<WhatsAppMessage[]>([]);
   const [text, setText] = useState('');
   const [error, setError] = useState('');
+  const [connectionError, setConnectionError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -51,7 +52,7 @@ export default function WhatsAppPage() {
   const api = useCallback(async (action: string, extra = {}) => {
     const response = await fetch('/api/whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...extra }) });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Não foi possível acessar o WhatsApp.');
+    if (!response.ok) throw new Error(data.code === 'CONFIG_MISSING' ? 'Configure a integração na VPS para conectar o WhatsApp.' : data.error || 'Não foi possível acessar o WhatsApp.');
     return data;
   }, []);
 
@@ -63,11 +64,15 @@ export default function WhatsAppPage() {
 
   useEffect(() => {
     let alive = true;
+    let checking = false;
     const check = async () => {
+      if (checking) return;
+      checking = true;
       try {
         const data = await api('status');
-        if (alive) { setState(data.instance?.state ?? 'close'); if (data.instance?.state === 'open') setQr(''); }
-      } catch (e) { if (alive) setError(e instanceof Error ? e.message : 'Falha na conexão.'); }
+        if (alive) { setState(data.instance?.state ?? 'close'); setConnectionError(''); if (data.instance?.state === 'open') setQr(''); }
+      } catch (e) { if (alive) { setState('error'); setConnectionError(e instanceof Error ? e.message : 'Falha na conexão.'); } }
+      finally { checking = false; }
     };
     void check();
     const timer = setInterval(check, 10000);
@@ -95,7 +100,7 @@ export default function WhatsAppPage() {
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'nearest' }); }, [messages]);
 
   async function connect() {
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setConnectionError('');
     try {
       const data = await api('status');
       setState(data.instance?.state ?? 'close');
@@ -106,7 +111,7 @@ export default function WhatsAppPage() {
         if (!image || !/^data:image\/png;base64,/.test(image)) throw new Error('QR Code indisponível. Aguarde alguns segundos e tente novamente.');
         setQr(image);
       }
-    } catch (e) { setError(e instanceof Error ? e.message : 'Falha ao conectar.'); }
+    } catch (e) { setState('error'); setConnectionError(e instanceof Error ? e.message : 'Falha ao conectar.'); }
     finally { setBusy(false); }
   }
 
@@ -133,39 +138,42 @@ export default function WhatsAppPage() {
     finally { setBusy(false); }
   }
 
-  return <div className="space-y-4">
-    <header className="flex flex-wrap items-center justify-between gap-3">
-      <div><h1 className="text-2xl font-semibold">WhatsApp</h1><p className="text-sm text-[var(--evo-muted)]">Converse com seus contatos e acompanhe as oportunidades.</p></div>
-      <span role="status" className="text-sm text-[var(--evo-support)]">{state === 'open' ? 'Conectado' : !state ? 'Verificando conexão…' : 'Não conectado'}</span>
+  return <div className="flex h-full min-h-0 flex-col gap-3">
+    <header className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+      <h1 className="text-xl font-semibold">WhatsApp</h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <span role="status" className="flex items-center gap-2 text-xs text-[var(--evo-muted)]"><span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${state === 'open' ? 'bg-[var(--evo-support)]' : state === 'error' ? 'bg-amber-400' : 'bg-[var(--evo-muted)]'}`} />{state === 'open' ? 'Conectado' : state === 'error' ? 'Conexão indisponível' : !state ? 'Verificando…' : 'Desconectado'}</span>
+        <button className={control} onClick={connect} disabled={busy}>{busy ? 'Aguarde…' : state === 'open' ? 'Configurar recebimento' : qr ? 'Renovar QR Code' : 'Conectar'}</button>
+      </div>
     </header>
-    <div className="flex flex-wrap items-end gap-3">
-      <button className={control} onClick={connect} disabled={busy}>{busy ? 'Aguarde…' : state === 'open' ? 'Configurar recebimento' : 'Conectar / renovar QR Code'}</button>
-    </div>
+    {connectionError && <div role="alert" className="shrink-0 rounded-lg bg-[var(--evo-surface)] px-4 py-3 text-sm">
+      <p className="text-amber-200">{connectionError}</p>
+      <details className="mt-1 text-xs text-[var(--evo-muted)]"><summary className="w-fit cursor-pointer py-1 focus-visible:outline focus-visible:outline-[var(--evo-accent)]">Como resolver</summary><p className="mt-2 max-w-2xl leading-relaxed">Confira o arquivo .env na pasta do CRM na VPS: EVOLUTION_PROVIDER=go, EVOLUTION_API_URL, EVOLUTION_API_KEY (token da instância), EVOLUTION_INSTANCE e EVOLUTION_WEBHOOK_URL. Recrie o container após salvar. Se a configuração já estiver completa, verifique a instância na Evolution GO e tente conectar novamente.</p></details>
+    </div>}
     {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
     {notice && <p role="status" className="text-sm text-[var(--evo-support)]">{notice}</p>}
-    {qr && <div className="flex flex-wrap items-center gap-5 rounded-xl bg-[var(--evo-card)] p-5"><img src={qr} alt="QR Code para conectar o WhatsApp" width={240} height={240} className="bg-white p-3" /><div><h2 className="font-semibold">Conecte seu número</h2><p className="mt-2 text-sm text-[var(--evo-muted)]">No celular, abra WhatsApp → Aparelhos conectados → Conectar aparelho.</p><p className="mt-2 text-sm text-[var(--evo-muted)]">Se o código expirar, clique em renovar QR Code.</p></div></div>}
-    <div className="grid min-h-[560px] grid-cols-1 overflow-hidden rounded-xl border border-[var(--evo-border)] bg-[var(--evo-card)] md:grid-cols-[260px_minmax(0,1fr)]">
-      <aside className={`${selected ? 'hidden md:block' : ''} border-r border-[var(--evo-border)] p-3`}>
+    {qr && <div className="flex max-h-[45vh] shrink-0 flex-wrap items-center gap-4 overflow-y-auto rounded-xl bg-[var(--evo-card)] p-4"><img src={qr} alt="QR Code para conectar o WhatsApp" width={180} height={180} className="bg-white p-2" /><div><h2 className="font-semibold">Conecte seu número</h2><p className="mt-2 text-sm text-[var(--evo-muted)]">WhatsApp → Aparelhos conectados → Conectar aparelho.</p></div></div>}
+    <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-xl border border-[var(--evo-border)] bg-[var(--evo-card)] md:grid-cols-[280px_minmax(0,1fr)]">
+      <aside className={`${selected ? 'hidden md:flex' : 'flex'} min-h-0 flex-col border-r border-[var(--evo-border)] p-3`}>
         <label className="sr-only" htmlFor="contact-search">Buscar contato</label><input id="contact-search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar nome ou telefone" className={`${control} w-full`} />
-        <div className="mt-3 max-h-[520px] overflow-y-auto">{visible.map(c => <button key={c.phone} onClick={() => { setSelected(c.phone); setNotice(''); setError(''); }} className={`w-full rounded-lg p-3 text-left focus-visible:outline focus-visible:outline-[var(--evo-accent)] ${selected === c.phone ? 'bg-[var(--evo-surface2)]' : 'hover:bg-[var(--evo-surface)]'}`}><div className="truncate text-sm font-medium">{c.name}</div><div className="truncate text-xs text-[var(--evo-muted)]">{c.company}</div><div className="mt-1 text-xs text-[var(--evo-muted)]">+{c.phone}</div></button>)}{!visible.length && <p className="p-3 text-sm text-[var(--evo-muted)]">Nenhum contato com telefone válido. Cadastre o WhatsApp em Clientes ou Leads.</p>}</div>
+        <div className="mt-2 min-h-0 flex-1 overflow-y-auto">{visible.map(c => <button key={c.phone} aria-pressed={selected === c.phone} onClick={() => { setSelected(c.phone); setNotice(''); setError(''); }} className={`w-full rounded-lg px-3 py-3 text-left focus-visible:outline focus-visible:outline-[var(--evo-accent)] ${selected === c.phone ? 'bg-[var(--evo-surface2)]' : 'hover:bg-[var(--evo-surface)]'}`}><div className="truncate text-sm font-medium">{c.name}</div><div className="mt-1 truncate text-xs text-[var(--evo-muted)]">{c.company && c.company !== c.name ? c.company : `+${c.phone}`}</div></button>)}{!visible.length && <p className="p-3 text-sm text-[var(--evo-muted)]">Nenhum contato encontrado.</p>}</div>
       </aside>
-      <section className={`${!selected ? 'hidden md:flex' : 'flex'} min-w-0 flex-col`}>
+      <section className={`${!selected ? 'hidden md:flex' : 'flex'} min-h-0 min-w-0 flex-col`}>
         {contact ? <>
-          <div className="space-y-3 border-b border-[var(--evo-border)] p-4">
-            <div className="flex items-center gap-2"><button aria-label="Voltar aos contatos" className={`${control} md:hidden`} onClick={() => setSelected('')}><ArrowLeft size={16} /></button><h2 className="font-semibold">{contact.name}</h2></div>
+          <div className="shrink-0 space-y-2 border-b border-[var(--evo-border)] p-4">
+            <div className="flex items-center gap-2"><button aria-label="Voltar aos contatos" className={`${control} md:hidden`} onClick={() => setSelected('')}><ArrowLeft size={16} /></button><div className="min-w-0"><h2 className="truncate text-sm font-semibold">{contact.name}</h2><p className="mt-1 text-xs text-[var(--evo-muted)]">+{contact.phone}</p></div></div>
             <div className="flex flex-wrap items-center gap-2">
               {opportunities.length > 1 && <select aria-label="Oportunidade" className={control} value={opportunity?.id ?? ''} onChange={e => setOppId(e.target.value)}>{opportunities.map(o => <option key={o.id} value={o.id}>{o.title}</option>)}</select>}
               {opportunity ? <label className="text-sm">Etapa <select className={control} value={opportunity.stage_slug} disabled={busy || !stages.length} onChange={e => void classify(e.target.value)}>{!stages.some(s => s.slug === opportunity.stage_slug) && <option value={opportunity.stage_slug}>{opportunity.stage_slug}</option>}{stages.map(s => <option key={s.id} value={s.slug}>{s.name}</option>)}</select></label> : <p className="text-sm text-[var(--evo-muted)]">Sem oportunidade vinculada. <Link href="/pipeline" className="underline text-[var(--evo-support)]">Cadastrar no pipeline</Link></p>}
             </div>
           </div>
-          <div className="h-[360px] flex-1 space-y-3 overflow-y-auto p-4" aria-label="Histórico de mensagens" aria-busy={loading}>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4" aria-label="Histórico de mensagens" aria-busy={loading}>
             {loading ? <p className="text-sm text-[var(--evo-muted)]">Carregando mensagens…</p> : !messages.length && <p className="text-sm text-[var(--evo-muted)]">{state !== 'open' ? 'Conecte o WhatsApp para carregar a conversa.' : 'Nenhuma mensagem sincronizada para este contato.'}</p>}
             {messages.map(m => <div key={m.id} className={`flex ${m.fromMe ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] rounded-xl px-4 py-2 ${m.fromMe ? 'bg-[var(--evo-surface2)]' : 'bg-[var(--evo-surface)]'}`}><p className="whitespace-pre-wrap break-words text-sm">{m.text}</p><p className="mt-1 text-right text-xs text-[var(--evo-muted)]">{m.timestamp ? new Date(m.timestamp * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</p></div></div>)}<div ref={bottom} />
           </div>
           <form onSubmit={send} className="flex items-end gap-2 border-t border-[var(--evo-border)] p-3"><label className="sr-only" htmlFor="message-text">Mensagem</label><textarea id="message-text" rows={2} maxLength={4096} value={text} onChange={e => setText(e.target.value)} placeholder="Escreva sua mensagem" disabled={state !== 'open' || busy} className={`${control} min-w-0 flex-1 resize-none`} /><button type="submit" disabled={busy || !text.trim() || state !== 'open'} className={`${control} flex items-center gap-2`}><Send size={16} />Enviar</button></form>
-        </> : <div className="m-auto p-6 text-center text-[var(--evo-muted)]"><MessageSquare className="mx-auto mb-3" /><p>Selecione um contato para abrir a conversa.</p></div>}
+        </> : <div className="m-auto p-6 text-center text-[var(--evo-muted)]"><MessageSquare size={28} strokeWidth={1.5} className="mx-auto mb-3" /><p className="text-sm">Selecione uma conversa</p></div>}
       </section>
     </div>
-    <p className="text-xs text-[var(--evo-muted)]">Últimas 100 mensagens recebidas pela integração. Atualização a cada 5 segundos. Áudios e anexos aparecem como indicação; o envio nesta versão é de texto.</p>
   </div>;
 }

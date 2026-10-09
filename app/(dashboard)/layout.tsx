@@ -12,7 +12,9 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const [isCommandOpen, setIsCommandOpen] = useState(false);
-  const isBoard = usePathname() === '/mensagens';
+  const pathname = usePathname();
+  const isBoard = pathname === '/mensagens';
+  const isWhatsApp = pathname === '/whatsapp';
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#07100F]">
@@ -25,8 +27,8 @@ export default function DashboardLayout({
         <Topbar onOpenSearch={() => setIsCommandOpen(true)} />
 
         {/* Conteúdo com iluminação atmosférica sutil */}
-        <main className={isBoard ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 overflow-y-auto p-6 md:p-8 evo-atmospheric-glow'}>
-          <div className={isBoard ? 'h-full min-h-0 w-full' : 'max-w-7xl mx-auto space-y-8 pb-16'}>{children}</div>
+        <main className={isBoard ? 'flex-1 min-h-0 overflow-hidden' : isWhatsApp ? 'flex-1 min-h-0 overflow-hidden p-3 md:p-6' : 'flex-1 overflow-y-auto p-6 md:p-8 evo-atmospheric-glow'}>
+          <div className={isBoard || isWhatsApp ? 'h-full min-h-0 w-full' : 'max-w-7xl mx-auto space-y-8 pb-16'}>{children}</div>
         </main>
       </div>
 

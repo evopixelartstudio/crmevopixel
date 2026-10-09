@@ -24,6 +24,27 @@ SUPABASE_SERVICE_ROLE_KEY=chave-service-role-do-supabase
 
 `EVOLUTION_API_KEY` e `SUPABASE_SERVICE_ROLE_KEY` ficam somente no servidor; nunca use o prefixo `NEXT_PUBLIC` nelas. WhatsApp e Rabisco abrem diretamente, sem pedir uma chave adicional. Seus endpoints seguem o acesso aberto atual do CRM. O webhook continua validando `instanceToken` contra o token configurado e persiste a mensagem antes de confirmar o recebimento. As tabelas de conversas e Rabisco não são abertas à chave pública anônima do Supabase.
 
+## Se aparecer “Configure a integração na VPS”
+
+Esse aviso significa que o processo do CRM não recebeu uma ou mais variáveis obrigatórias. Editar este documento não configura o servidor. O `.env` é ignorado pelo Git: um `git pull` não leva o arquivo local até a VPS.
+
+1. Na VPS, coloque o `.env` preenchido na mesma pasta de `docker-compose.yml`. Use o exemplo acima com os seus valores reais e mantenha as variáveis do Supabase existentes.
+2. Naquela pasta, com o código atualizado, recrie o serviço:
+
+```bash
+docker compose --env-file .env up -d --build --force-recreate crmevopixel
+```
+
+3. Confira se o container recebeu as variáveis, sem mostrar os valores:
+
+```bash
+docker compose exec crmevopixel node -e 'for (const key of ["EVOLUTION_PROVIDER","EVOLUTION_API_URL","EVOLUTION_API_KEY","EVOLUTION_INSTANCE","EVOLUTION_WEBHOOK_URL","SUPABASE_SERVICE_ROLE_KEY"]) console.log(key + ": " + (process.env[key]?.trim() ? "configurada" : "AUSENTE"))'
+```
+
+4. Reabra WhatsApp e clique em **Configurar recebimento** após aparecer **Conectado**.
+
+Se usa um painel de deploy em vez deste Compose, cadastre essas mesmas variáveis no ambiente do serviço CRM e recrie o container pelo painel. Se usa PM2, configure o `.env` na pasta da aplicação e reinicie o processo com o ambiente atualizado.
+
 ## Conversas e pipeline
 
 O envio desta versão é de texto. Áudios, vídeos, imagens e documentos são indicados no histórico; não há reprodução ou download de anexos. Na Evolution GO o histórico do CRM fica em `whatsapp_messages` no Supabase, com deduplicação por instância e ID da mensagem. São registrados os eventos recebidos após configurar o webhook. Esta versão não importa conversas antigas por HistorySync. Grupos, listas de transmissão e identificadores LID sem telefone resolvido não são associados a clientes.
