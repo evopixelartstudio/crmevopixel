@@ -17,6 +17,12 @@ Este guia documenta o passo a passo para hospedar o **EVOCRM** na **VPS da Hosti
 
 ---
 
+### Atualizar um banco existente: Rabisco
+
+Se o Rabisco mostrar `Could not find the table 'public.rabisco_boards' in the schema cache`, abra o **SQL Editor do mesmo projeto Supabase configurado no CRM** e execute o conteúdo de `supabase/migrations/20261006_create_rabisco_boards.sql`.
+
+Esse script cria a tabela, configura o acesso autenticado e solicita a atualização do cache da API. Pode ser executado novamente sem apagar o quadro existente. Depois, clique em **Tentar novamente** no Rabisco. Atualizar o código na VPS não executa as migrations do banco.
+
 ## 2. Preparação da VPS Hostinger (Ubuntu)
 
 Conecte-se à sua VPS via SSH:

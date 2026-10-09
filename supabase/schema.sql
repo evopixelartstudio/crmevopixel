@@ -574,3 +574,5 @@ BEGIN
       FOR ALL TO authenticated USING (true) WITH CHECK (true);
   END IF;
 END $$;
+
+NOTIFY pgrst, 'reload schema';

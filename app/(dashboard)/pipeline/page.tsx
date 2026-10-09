@@ -2,6 +2,7 @@
 
 import { deletePipelineOpportunities } from '@/lib/services/pipeline-deletion';
 import { ensureFollowUpStages } from '@/lib/services/pipeline-follow-up-stages';
+import { getPipelineStageMap, isNegotiationStage } from '@/lib/services/pipeline-stages';
 import { hasEnteredPipeline } from '@/lib/services/pipeline-entry';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -338,7 +339,7 @@ export default function PipelinePage() {
       return {
         id: row.id,
         lead_id: row.lead_id ?? (leadObj?.id || null),
-        stage_id: row.stage_id,
+        stage_id: stage?.id || row.stage_id,
         company_id: row.company_id ?? null,
         title: row.title || companyName,
         estimated_value: Number(row.estimated_value) || 0,
@@ -418,18 +419,16 @@ export default function PipelinePage() {
       }
 
       const loadedStages = await ensureFollowUpStages((stagesRes.data || []) as PipelineStage[]);
-      setStages(loadedStages);
-      setNewStageId((prev) => prev || (loadedStages[0]?.id ?? ''));
+      const stageMap = getPipelineStageMap(loadedStages);
+      const visibleStages = loadedStages.filter(stage => !isNegotiationStage(stage));
+      setStages(visibleStages);
+      setNewStageId((prev) => visibleStages.some(stage => stage.id === prev) ? prev : (visibleStages[0]?.id ?? ''));
 
       const parsedLeads: Lead[] =
         !leadsRes.error && leadsRes.data
           ? leadsRes.data.map((r: any) => parseLeadFromSupabase(r))
           : [];
       setLeadsList(parsedLeads);
-
-      const stageMap = new Map<string, PipelineStage>(
-        loadedStages.map((s) => [s.id, s])
-      );
 
       const loadedOpps = ((oppsRes.data || []) as SupabaseOpportunityRow[]).map((row) =>
         mapRowToOpportunity(row, stageMap, parsedLeads)
@@ -1085,7 +1084,7 @@ export default function PipelinePage() {
             Pipeline de Vendas
           </h1>
           <p className="text-xs text-[#9BA6A0] mt-1">
-            Leads em negociação sincronizados diretamente com o Supabase.
+            Oportunidades sincronizadas diretamente com o Supabase.
           </p>
         </div>
 

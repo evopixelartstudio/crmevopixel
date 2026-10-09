@@ -15,3 +15,6 @@ BEGIN
       FOR ALL TO authenticated USING (true) WITH CHECK (true);
   END IF;
 END $$;
+
+-- Atualiza as tabelas expostas pela API após a criação do quadro.
+NOTIFY pgrst, 'reload schema';
