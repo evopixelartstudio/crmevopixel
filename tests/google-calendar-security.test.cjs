@@ -7,8 +7,17 @@ const filename = require.resolve('../lib/server/google-calendar.ts');
 const compiled = new Module(filename, module);
 compiled.require = name => name === './crm-access' ? { cloudDatabase: () => { throw new Error('Unexpected database call'); } } : module.require(name);
 compiled._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, filename);
-const { seal, unseal, sessionId, calendarConfig, pkceChallenge } = compiled.exports;
+const { seal, unseal, sessionId, calendarConfig, pkceChallenge, agendaOrigin } = compiled.exports;
 process.env.GOOGLE_CALENDAR_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
+
+test('failure redirect uses public configured origin even with missing credentials', () => {
+  process.env.GOOGLE_CALENDAR_REDIRECT_URI = 'https://crmevopixel.cloud/api/agenda/callback';
+  assert.equal(agendaOrigin(), 'https://crmevopixel.cloud');
+  process.env.GOOGLE_CALENDAR_REDIRECT_URI = 'https://0.0.0.0:3000/api/agenda/callback';
+  assert.equal(agendaOrigin(), 'https://crmevopixel.cloud');
+  process.env.GOOGLE_CALENDAR_REDIRECT_URI = 'invalid';
+  assert.equal(agendaOrigin(), 'https://crmevopixel.cloud');
+});
 
 test('credentials are authenticated, encrypted and bound to their purpose', () => {
   const token = seal({ refreshToken: 'private-google-token' }, 'credentials');

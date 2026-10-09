@@ -62,6 +62,12 @@ Cada navegador autorizado acessa sua própria conexão. O acesso à Agenda exige
 
 **Desconectar** remove do Supabase a conexão usada por esta sessão e limpa o cookie. Não apaga reuniões e não revoga outras conexões autorizadas; para revogar o aplicativo na conta inteira, use as configurações de segurança da sua conta Google.
 
+## Se a conexão falhar
+
+O retorno da autorização usa o domínio de `GOOGLE_CALENDAR_REDIRECT_URI`, inclusive quando ocorre um erro. O endereço interno do Docker (`0.0.0.0:3000`) não deve aparecer no navegador.
+
+A tela Agenda informa em qual etapa a conexão falhou: sessão, consentimento, credenciais, permissões ou gravação no Supabase. Ao autorizar, marque as duas permissões de Agenda solicitadas. Se a sessão expirar, comece novamente pelo botão **Conectar Google Agenda**, na mesma aba.
+
 ## Validação após configurar
 
 1. Autorizar a conta e conferir a semana com os mesmos compromissos do Google Agenda.

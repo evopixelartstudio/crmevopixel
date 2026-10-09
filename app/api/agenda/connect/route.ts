@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'node:crypto';
-import { calendarConfig, cookieOptions, GOOGLE_SCOPES, OAUTH_COOKIE, pkceChallenge, seal } from '@/lib/server/google-calendar';
+import { agendaOrigin, calendarConfig, cookieOptions, GOOGLE_SCOPES, OAUTH_COOKIE, pkceChallenge, seal } from '@/lib/server/google-calendar';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,6 +18,6 @@ export async function GET(_request: NextRequest) {
     response.headers.set('Referrer-Policy', 'no-referrer');
     return response;
   } catch {
-    return NextResponse.redirect(new URL('/agenda?google=config', _request.url));
+    return NextResponse.redirect(new URL('/agenda?google=config', agendaOrigin()));
   }
 }

@@ -10,6 +10,15 @@ export class CalendarError extends Error {
   constructor(message: string, public status = 503, public code = 'CALENDAR_ERROR') { super(message); }
 }
 
+export function agendaOrigin(): string {
+  try {
+    const url = new URL(process.env.GOOGLE_CALENDAR_REDIRECT_URI || 'https://crmevopixel.cloud/api/agenda/callback');
+    if (url.protocol === 'https:' && !['0.0.0.0', '127.0.0.1'].includes(url.hostname)) return url.origin;
+    if (url.protocol === 'http:' && url.hostname === 'localhost') return url.origin;
+  } catch { /* Invalid configuration still returns to the public CRM. */ }
+  return 'https://crmevopixel.cloud';
+}
+
 export function calendarConfig() {
   const clientId = process.env.GOOGLE_CALENDAR_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
@@ -65,7 +74,11 @@ export async function googleToken(parameters: Record<string, string>) {
     body: new URLSearchParams({ client_id: config.clientId, client_secret: config.clientSecret, ...parameters }),
     cache: 'no-store', signal: AbortSignal.timeout(20000),
   });
-  if (!response.ok) throw new CalendarError('Autorize sua conta Google novamente para continuar.', 401, 'RECONNECT');
+  if (!response.ok) {
+    const failure = await response.json().catch(() => ({}));
+    if (failure.error === 'invalid_client') throw new CalendarError('Confira o ID e o segredo do cliente Google no ambiente da VPS.', 401, 'OAUTH_CLIENT');
+    throw new CalendarError('Autorize sua conta Google novamente para continuar.', 401, 'RECONNECT');
+  }
   const token = await response.json();
   if (typeof token.access_token !== 'string') throw new CalendarError('O Google não confirmou a autorização.');
   return token as { access_token: string; refresh_token?: string; expires_in: number; scope?: string };

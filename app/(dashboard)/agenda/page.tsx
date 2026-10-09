@@ -54,6 +54,16 @@ export default function AgendaPage() {
         const result = new URLSearchParams(window.location.search).get('google');
         if (result) {
           window.history.replaceState(null, '', '/agenda');
+          const failures: Record<string, string> = {
+            session: 'A autorização expirou ou o cookie de conexão não chegou. Clique em Conectar Google Agenda e conclua na mesma aba.',
+            denied: 'A autorização foi cancelada no Google. Conecte novamente para permitir o acesso.',
+            token: 'O Google não confirmou a autorização. Confira as credenciais e a URI de retorno na VPS e conecte novamente.',
+            client: 'O Google recusou as credenciais. Copie o ID e o segredo diretamente do cliente OAuth para o ambiente da VPS e implante novamente.',
+            permissions: 'Faltou uma permissão da Agenda. Conecte novamente e marque as permissões para eventos e lista de agendas na tela do Google.',
+            identity: 'Não foi possível confirmar sua conta Google. Conecte novamente e autorize o acesso ao e-mail.',
+            database: 'A autorização chegou, mas a conexão não foi salva no Supabase. Confira o SQL da Agenda, a URL do projeto e a chave service_role na VPS.',
+          };
+          if (failures[result]) setError(failures[result]);
           if (result === 'failed') setError('A conexão não foi concluída. Confira as permissões no Google e o SQL da Agenda e tente novamente.');
           if (result === 'config') setError('Configure a conexão com o Google Agenda no servidor.');
           if (result === 'connected') setNotice('Google Agenda conectado.');
