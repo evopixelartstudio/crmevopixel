@@ -20,6 +20,7 @@ import {
   History,
   Crosshair,
   CalendarCheck,
+  CalendarDays,
   MessageSquare,
 } from 'lucide-react';
 
@@ -61,6 +62,7 @@ export function Sidebar() {
         { label: 'Mensalistas', href: '/mensalidades', icon: CalendarCheck, badge: 'MRR' },
         { label: 'Projetos', href: '/projetos', icon: Briefcase },
         { label: 'Tarefas', href: '/tarefas', icon: CheckSquare },
+        { label: 'Agenda', href: '/agenda', icon: CalendarDays },
       ],
     },
     {
