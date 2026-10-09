@@ -4,6 +4,7 @@ import { formatWhatsAppNumber } from '@/lib/utils/whatsapp';
 import { normalizeWhatsAppMessages } from '@/lib/services/whatsapp-messages';
 import { cloudDatabase } from '@/lib/server/crm-access';
 import { normalizeGoStatus, normalizeGoQr } from '@/lib/services/evolution-go';
+import { summarizeInbox, type InboxMessage } from '@/lib/services/whatsapp-inbox';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,6 +32,26 @@ export async function POST(request: NextRequest) {
     const go = process.env.EVOLUTION_PROVIDER === 'go';
     let result: unknown;
     switch (body.action) {
+      case 'conversations': {
+        if (!go) { result = []; break; }
+        const db = cloudDatabase();
+        const rows: InboxMessage[] = [];
+        // Read every page so a busy conversation cannot hide other contacts.
+        for (let offset = 0; ; offset += 1000) {
+          const { data, error } = await db.from('whatsapp_messages').select('phone, from_me, body, sent_at, status').eq('instance', process.env.EVOLUTION_INSTANCE!).order('sent_at', { ascending: false }).order('id').range(offset, offset + 999);
+          if (error) throw new Error('Não foi possível carregar as conversas do Supabase.');
+          rows.push(...(data ?? []));
+          if (!data || data.length < 1000) break;
+        }
+        result = summarizeInbox(rows); break;
+      }
+      case 'read': {
+        if (!go) { result = { read: true }; break; }
+        if (typeof body.phone !== 'string' || !/^\d{10,15}$/.test(body.phone) || typeof body.through !== 'number' || !Number.isFinite(body.through) || body.through <= 0 || body.through > Date.now() / 1000 + 60) return NextResponse.json({ error: 'Conversa inválida.' }, { status: 400 });
+        const { error } = await cloudDatabase().from('whatsapp_messages').update({ status: 'read' }).eq('instance', process.env.EVOLUTION_INSTANCE!).eq('phone', body.phone).eq('from_me', false).eq('status', 'received').lte('sent_at', new Date(body.through * 1000).toISOString());
+        if (error) throw new Error('Não foi possível marcar a conversa como lida.');
+        result = { read: true }; break;
+      }
       case 'status': result = go ? normalizeGoStatus(await evolution('instance/status')) : await evolution(`instance/connectionState/${instance}`); break;
       case 'connect': {
         if (!go) { result = await evolution(`instance/connect/${instance}`); break; }

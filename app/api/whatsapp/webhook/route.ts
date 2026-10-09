@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     const { error } = await cloudDatabase().from('whatsapp_messages').upsert({
       instance: process.env.EVOLUTION_INSTANCE || 'evocrm', message_id: message.id, phone: message.phone,
       from_me: message.fromMe, body: message.text, sent_at: new Date(message.timestamp * 1000).toISOString(), status: message.fromMe ? 'sent' : 'received',
-    }, { onConflict: 'instance,message_id' });
+    }, { onConflict: 'instance,message_id', ignoreDuplicates: true });
     if (error) return NextResponse.json({ error: 'Não foi possível persistir o evento no Supabase.' }, { status: 503 });
     return NextResponse.json({ received: true, stored: true });
   } catch (error) {
