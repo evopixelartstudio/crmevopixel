@@ -22,9 +22,16 @@ let remoteLeads = [];
 let failLeadInsert = false;
 let stageSaved = false;
 let stageWrites = 0;
+let monthlySaved = false;
+let remoteMonthly = null;
+const monthlyRows = new Map();
 const dbService = new Proxy({}, {
   get: (_, key) => async (...args) => {
     if (key === 'getLeads') return remoteLeads;
+    if (key === 'getMonthlyClients') return remoteMonthly;
+    if (key === 'insertMonthlyClient') { if (!monthlySaved) return null; monthlyRows.set(args[0].id, args[0]); return args[0]; }
+    if (key === 'updateMonthlyClient') { if (!monthlySaved) return null; const saved = { ...monthlyRows.get(args[0]), ...args[1] }; monthlyRows.set(args[0], saved); return saved; }
+    if (key === 'deleteMonthlyClient') return monthlySaved;
     if (key === 'insertLead') { inserted.push(args[0]); return failLeadInsert ? null : args[0]; }
     if (key === 'updateHistoricalProject') { updates.push(args); return true; }
     if (key === 'saveMonthlyExpense' || key === 'deleteMonthlyExpense') return true;
@@ -36,6 +43,44 @@ const dbPath = require.resolve('../lib/supabase/db-service.ts');
 require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { dbService } };
 const { crmService } = require('../lib/services/crm-service.ts');
 const { hasEnteredPipeline } = require('../lib/services/pipeline-entry.ts');
+
+test('MRR confirms persisted UUID before changing totals and preserves data on failed updates and deletion', async () => {
+  const draft = { client_name: 'Cliente', company_name: 'Empresa', segment: 'Geral', plan_name: 'Plano', monthly_value: 450, billing_day: 10, payment_method: 'pix', status: 'ativo', current_month_status: 'pendente', start_date: '2026-10-09' };
+  const before = crmService.getMonthlyClients().length;
+  await assert.rejects(crmService.addMonthlyClient(draft), /Supabase/);
+  assert.equal(crmService.getMonthlyClients().length, before);
+  monthlySaved = true;
+  const saved = await crmService.addMonthlyClient(draft);
+  await crmService.addMonthlyClient(draft, saved.id);
+  assert.equal(crmService.getMonthlyClients().filter(c => c.id === saved.id).length, 1);
+  assert.match(saved.id, /^[0-9a-f-]{36}$/);
+  assert.equal(crmService.getMonthlyClientById(saved.id).monthly_value, 450);
+  monthlySaved = false;
+  await assert.rejects(crmService.updateMonthlyClient(saved.id, { monthly_value: 900 }), /Supabase/);
+  await assert.rejects(crmService.toggleMonthlyPaymentStatus(saved.id, 'pago'), /Supabase/);
+  await assert.rejects(crmService.deleteMonthlyClient(saved.id), /Supabase/);
+  assert.equal(crmService.getMonthlyClientById(saved.id).monthly_value, 450);
+  assert.equal(crmService.getMonthlyClientById(saved.id).current_month_status, 'pendente');
+  monthlySaved = true;
+  await crmService.toggleMonthlyPaymentStatus(saved.id, 'pago');
+  assert.equal(crmService.getMonthlyClientById(saved.id).current_month_status, 'pago');
+  await crmService.deleteMonthlyClient(saved.id);
+  assert.equal(crmService.getMonthlyClientById(saved.id), undefined);
+  monthlySaved = false;
+});
+
+test('MRR ignores stale refresh after confirmed save and accepts a truly empty remote list', async () => {
+  let finishLoad;
+  remoteMonthly = new Promise(resolve => { finishLoad = resolve; });
+  const loading = crmService.initFromSupabase(true);
+  monthlySaved = true;
+  const saved = await crmService.addMonthlyClient({ client_name: 'Cliente', company_name: 'Empresa', segment: 'Geral', plan_name: 'Plano', monthly_value: 120, billing_day: 10, payment_method: 'pix', status: 'ativo', current_month_status: 'pendente', start_date: '2026-10-09' });
+  finishLoad([]); await loading;
+  assert.ok(crmService.getMonthlyClientById(saved.id));
+  remoteMonthly = []; await crmService.initFromSupabase(true);
+  assert.deepEqual(crmService.getMonthlyClients(), []);
+  remoteMonthly = null; monthlySaved = false;
+});
 
 test('confirmed stage change preserves state on failure and persists only once on success', async () => {
   const opportunity = crmService.addOpportunity({ lead_id: null, lead_name: 'Contato', company_name: 'Empresa', stage_slug: 'primeiro_contato', title: 'Teste WhatsApp', estimated_value: 0, probability: 0, score: 0, temperature: 'frio', priority: 'baixa', services: [] });

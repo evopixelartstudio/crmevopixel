@@ -87,6 +87,8 @@ class CrmService {
   private aiFeedbacks: AIFeedback[] = [];
   private initializedFromSupabase = false;
   private leadRevision = 0;
+  private monthlyRevision = 0;
+  private monthlyLoadError = '';
   private listeners: Set<() => void> = new Set();
 
   constructor() {
@@ -113,6 +115,7 @@ class CrmService {
   public async initFromSupabase(force = false): Promise<void> {
     if (this.initializedFromSupabase && !force) return;
     const leadRevisionAtStart = this.leadRevision;
+    const monthlyRevisionAtStart = this.monthlyRevision;
     try {
       const [
         clients,
@@ -201,11 +204,12 @@ class CrmService {
 
         changed = true; 
       }
-      if (monthly && monthly.length > 0) {
+      if (monthly !== null && monthlyRevisionAtStart === this.monthlyRevision) {
         this.monthlyClients = monthly;
-
+        this.monthlyLoadError = '';
         changed = true;
       }
+      if (monthly === null && monthlyRevisionAtStart === this.monthlyRevision) { this.monthlyLoadError = 'Não foi possível carregar as mensalidades. Execute 20261009_monthly_clients_fix.sql e confira o Supabase na VPS.'; changed = true; }
       if (leads !== null && leadRevisionAtStart === this.leadRevision) {
         this.leads = leads;
 
@@ -1548,59 +1552,51 @@ class CrmService {
   public getMonthlyClients(): MonthlyClient[] {
     return this.monthlyClients;
   }
+  public getMonthlyLoadError(): string { return this.monthlyLoadError; }
 
   public getMonthlyClientById(id: string): MonthlyClient | undefined {
     return this.monthlyClients.find((c) => c.id === id);
   }
 
-  public addMonthlyClient(data: Omit<MonthlyClient, 'id'>): MonthlyClient {
+  public async addMonthlyClient(data: Omit<MonthlyClient, 'id'>, requestId = crypto.randomUUID()): Promise<MonthlyClient> {
     const newClient: MonthlyClient = {
       ...data,
-      id: `mth-${Date.now()}`,
+      id: requestId,
     };
-    this.monthlyClients.unshift(newClient);
-
-    dbService.insertMonthlyClient(newClient);
+    const saved = await dbService.insertMonthlyClient(newClient);
+    if (!saved) throw new Error('Não foi possível salvar a mensalidade no Supabase.');
+    this.monthlyRevision++;
+    this.monthlyClients = [saved, ...this.monthlyClients.filter(c => c.id !== saved.id)];
+    this.monthlyLoadError = '';
     this.notify();
-    return newClient;
+    return saved;
   }
 
-  public updateMonthlyClient(id: string, data: Partial<MonthlyClient>): MonthlyClient | undefined {
+  public async updateMonthlyClient(id: string, data: Partial<MonthlyClient>): Promise<MonthlyClient> {
     const client = this.monthlyClients.find((c) => c.id === id);
-    if (client) {
-      Object.assign(client, data);
-
-      dbService.updateMonthlyClient(id, data);
-      this.notify();
-    }
-    return client;
+    if (!client) throw new Error('Mensalidade não encontrada. Atualize a página.');
+    const saved = await dbService.updateMonthlyClient(id, data);
+    if (!saved) throw new Error('Não foi possível atualizar a mensalidade no Supabase.');
+    this.monthlyRevision++;
+    this.monthlyClients = this.monthlyClients.map(c => c.id === id ? saved : c);
+    this.notify();
+    return saved;
   }
 
-  public deleteMonthlyClient(id: string): void {
+  public async deleteMonthlyClient(id: string): Promise<void> {
+    if (!await dbService.deleteMonthlyClient(id)) throw new Error('Não foi possível excluir a mensalidade no Supabase.');
+    this.monthlyRevision++;
     this.monthlyClients = this.monthlyClients.filter((c) => c.id !== id);
-
-    dbService.deleteMonthlyClient(id);
     this.notify();
   }
 
-  public toggleMonthlyPaymentStatus(
+  public async toggleMonthlyPaymentStatus(
     id: string,
     status: 'pago' | 'pendente' | 'atrasado'
-  ): MonthlyClient | undefined {
+  ): Promise<MonthlyClient> {
     const client = this.monthlyClients.find((c) => c.id === id);
-    if (client) {
-      client.current_month_status = status;
-      if (status === 'pago') {
-        client.last_payment_date = new Date().toISOString().split('T')[0];
-      }
-
-      dbService.updateMonthlyClient(id, {
-        current_month_status: client.current_month_status,
-        last_payment_date: client.last_payment_date,
-      });
-      this.notify();
-    }
-    return client;
+    if (!client) throw new Error('Mensalidade não encontrada.');
+    return this.updateMonthlyClient(id, { current_month_status: status, ...(status === 'pago' ? { last_payment_date: new Date().toISOString().split('T')[0] } : {}) });
   }
 
   public getMonthlySubscriptionsSummary() {

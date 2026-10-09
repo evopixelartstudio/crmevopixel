@@ -11,6 +11,7 @@ import { isNegotiationStage } from '@/lib/services/pipeline-stages';
 import type { WhatsAppMessage } from '@/lib/services/whatsapp-messages';
 import type { PipelineStage } from '@/types/database';
 import type { WhatsAppConversation } from '@/lib/services/whatsapp-inbox';
+import { ContactContextPanel } from '@/components/whatsapp/ContactContextPanel';
 
 const control = 'rounded-lg border border-[var(--evo-border)] bg-[var(--evo-surface)] px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--evo-accent)] disabled:opacity-50';
 
@@ -212,6 +213,7 @@ export default function WhatsAppPage() {
               {opportunity ? <label className="text-sm">Etapa <select className={control} value={opportunity.stage_slug} disabled={busy || !stages.length} onChange={e => void classify(e.target.value)}>{!stages.some(s => s.slug === opportunity.stage_slug) && <option value={opportunity.stage_slug}>{opportunity.stage_slug}</option>}{stages.map(s => <option key={s.id} value={s.slug}>{s.name}</option>)}</select></label> : <p className="text-sm text-[var(--evo-muted)]">{!contact.clientId && !contact.leadIds.length ? <>Número ainda não cadastrado. <Link href="/leads" className="underline text-[var(--evo-support)]">Cadastrar lead</Link></> : <>Sem oportunidade vinculada. <Link href="/pipeline" className="underline text-[var(--evo-support)]">Cadastrar no pipeline</Link></>}</p>}
             </div>
           </div>
+          <div className="shrink-0 max-h-[40vh] overflow-y-auto border-b border-[var(--evo-border)] px-4 py-2"><ContactContextPanel key={contact.phone} phone={contact.phone} /></div>
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4" aria-label="Histórico de mensagens" aria-busy={loading}>
             {loading ? <p className="text-sm text-[var(--evo-muted)]">Carregando mensagens…</p> : !messages.length && <p className="text-sm text-[var(--evo-muted)]">{state !== 'open' ? 'Conecte o WhatsApp para carregar a conversa.' : 'Nenhuma mensagem sincronizada para este contato.'}</p>}
             {messages.map(m => <div key={m.id} className={`flex ${m.fromMe ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] rounded-xl px-4 py-2 ${m.fromMe ? 'bg-[var(--evo-surface2)]' : 'bg-[var(--evo-surface)]'}`}><p className="whitespace-pre-wrap break-words text-sm">{m.text}</p><p className="mt-1 text-right text-xs text-[var(--evo-muted)]">{m.timestamp ? new Date(m.timestamp * 1000).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</p></div></div>)}<div ref={bottom} />

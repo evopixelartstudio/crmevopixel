@@ -210,72 +210,23 @@ export class DatabaseService {
   // ============================================================================
   // CLIENTES MENSALISTAS (MRR)
   // ============================================================================
+  private async monthlyRequest(body?: unknown): Promise<any> {
+    const response = await fetch('/api/monthly-clients', body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { cache: 'no-store' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Falha ao salvar mensalidade no Supabase.');
+    return result;
+  }
   public async getMonthlyClients(): Promise<MonthlyClient[] | null> {
-    if (!isSupabaseConfigured()) return null;
-    try {
-      const supabase = getSupabase();
-      const { data, error } = await supabase
-        .from('monthly_clients')
-        .select('*')
-        .order('billing_day', { ascending: true });
-      if (error || !data) return null;
-      return data as MonthlyClient[];
-    } catch {
-      return null;
-    }
+    try { return await this.monthlyRequest(); } catch { return null; }
   }
-
-  public async insertMonthlyClient(client: MonthlyClient): Promise<boolean> {
-    if (!isSupabaseConfigured()) return false;
-    try {
-      const supabase = getSupabase();
-      const dataToInsert: any = { ...client };
-      if (dataToInsert.id && !isValidUUID(dataToInsert.id)) {
-        delete dataToInsert.id;
-      }
-      if (dataToInsert.client_id && !isValidUUID(dataToInsert.client_id)) {
-        delete dataToInsert.client_id;
-      }
-      if (dataToInsert.start_date && dataToInsert.start_date.includes('T')) {
-        dataToInsert.start_date = dataToInsert.start_date.split('T')[0];
-      }
-      const { error } = await supabase.from('monthly_clients').upsert([dataToInsert]);
-      return !error;
-    } catch {
-      return false;
-    }
+  public async insertMonthlyClient(client: MonthlyClient): Promise<MonthlyClient | null> {
+    return this.monthlyRequest({ action: 'save', create: true, id: client.id, data: client });
   }
-
-  public async updateMonthlyClient(id: string, data: Partial<MonthlyClient>): Promise<boolean> {
-    if (!isSupabaseConfigured()) return false;
-    try {
-      const supabase = getSupabase();
-      const dataToUpdate: any = { ...data };
-      if (dataToUpdate.id && !isValidUUID(dataToUpdate.id)) {
-        delete dataToUpdate.id;
-      }
-      if (dataToUpdate.client_id && !isValidUUID(dataToUpdate.client_id)) {
-        delete dataToUpdate.client_id;
-      }
-      if (dataToUpdate.start_date && dataToUpdate.start_date.includes('T')) {
-        dataToUpdate.start_date = dataToUpdate.start_date.split('T')[0];
-      }
-      const { error } = await supabase.from('monthly_clients').update(dataToUpdate).eq('id', id);
-      return !error;
-    } catch {
-      return false;
-    }
+  public async updateMonthlyClient(id: string, data: Partial<MonthlyClient>): Promise<MonthlyClient | null> {
+    return this.monthlyRequest({ action: 'save', id, data });
   }
-
   public async deleteMonthlyClient(id: string): Promise<boolean> {
-    if (!isSupabaseConfigured()) return false;
-    try {
-      const supabase = getSupabase();
-      const { error } = await supabase.from('monthly_clients').delete().eq('id', id);
-      return !error;
-    } catch {
-      return false;
-    }
+    return (await this.monthlyRequest({ action: 'delete', id })).deleted === true;
   }
 
   // ============================================================================

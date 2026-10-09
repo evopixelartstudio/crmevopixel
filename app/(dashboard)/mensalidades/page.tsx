@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import Link from 'next/link';
 import { crmService } from '@/lib/services/crm-service';
 import { useCrmSync } from '@/lib/hooks/useCrmSync';
@@ -28,6 +28,9 @@ export default function MensalidadesPage() {
   const registeredClients = crmService.getClients();
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const requestId = useRef('');
   const [statusFilter, setStatusFilter] = useState<'todos' | 'pago' | 'pendente' | 'atrasado'>('todos');
 
   // Modal de vinculação / edição de mensalista
@@ -56,6 +59,8 @@ export default function MensalidadesPage() {
   );
 
   const openNewModal = () => {
+    requestId.current = crypto.randomUUID();
+    setSaveError('');
     setEditId(null);
     setSelectedClientId(registeredClients[0]?.id || '');
     setClientSearchQuery('');
@@ -70,6 +75,7 @@ export default function MensalidadesPage() {
   };
 
   const openEditModal = (mc: MonthlyClient) => {
+    setSaveError('');
     setEditId(mc.id);
     const matched =
       registeredClients.find((c) => c.id === mc.client_id) ||
@@ -88,7 +94,7 @@ export default function MensalidadesPage() {
     setIsAddModalOpen(true);
   };
 
-  const handleSaveMonthlyClient = (e: React.FormEvent) => {
+  const handleSaveMonthlyClient = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!selectedClientObj && !editId) {
@@ -106,8 +112,11 @@ export default function MensalidadesPage() {
       return;
     }
 
+    if (saving) return;
+    setSaving(true); setSaveError('');
+    try {
     if (editId) {
-      crmService.updateMonthlyClient(editId, {
+      await crmService.updateMonthlyClient(editId, {
         client_id: selectedClientObj?.id || existingMonthly?.client_id,
         company_name: companyName,
         client_name: clientName,
@@ -119,7 +128,7 @@ export default function MensalidadesPage() {
         notes: formData.notes,
       });
     } else {
-      crmService.addMonthlyClient({
+      await crmService.addMonthlyClient({
         client_id: selectedClientObj!.id,
         company_name: companyName,
         client_name: clientName,
@@ -132,21 +141,27 @@ export default function MensalidadesPage() {
         current_month_status: 'pendente',
         start_date: new Date().toISOString().split('T')[0],
         notes: formData.notes,
-      });
+      }, requestId.current || (requestId.current = crypto.randomUUID()));
     }
 
     setIsAddModalOpen(false);
     setEditId(null);
+    } catch (e) { setSaveError(e instanceof Error ? e.message : 'Falha ao salvar.'); }
+    finally { setSaving(false); }
   };
 
   const handleTogglePayment = (id: string, currentStatus: 'pago' | 'pendente' | 'atrasado') => {
     const nextStatus = currentStatus === 'pago' ? 'pendente' : 'pago';
-    crmService.toggleMonthlyPaymentStatus(id, nextStatus);
+    if (saving) return;
+    setSaving(true); setSaveError('');
+    void crmService.toggleMonthlyPaymentStatus(id, nextStatus).catch(e => setSaveError(e.message)).finally(() => setSaving(false));
   };
 
   const handleDelete = (id: string) => {
     if (confirm('Tem certeza que deseja desvincular este cliente mensalista?')) {
-      crmService.deleteMonthlyClient(id);
+      if (saving) return;
+      setSaving(true); setSaveError('');
+      void crmService.deleteMonthlyClient(id).catch(e => setSaveError(e.message)).finally(() => setSaving(false));
     }
   };
 
@@ -173,6 +188,8 @@ export default function MensalidadesPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
+      {saveError && !isAddModalOpen && <p role="alert" className="text-sm text-red-300">{saveError}</p>}
+      {crmService.getMonthlyLoadError() && <p role="alert" className="text-sm text-red-300">{crmService.getMonthlyLoadError()}</p>}
       {/* 1. Cabeçalho */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[rgba(218,241,222,0.06)] pb-5">
         <div>
@@ -432,6 +449,7 @@ export default function MensalidadesPage() {
         subtitle="Selecione um cliente já cadastrado na EvoPixel e defina as condições do plano recorrente."
       >
         <form onSubmit={handleSaveMonthlyClient} className="space-y-4">
+          {saveError && <p role="alert" className="text-sm text-red-300">{saveError}</p>}
           {registeredClients.length === 0 ? (
             <div className="p-4 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-xs text-[#9BA6A0] space-y-2">
               <p className="text-[#E7ECE8] font-medium">
@@ -593,10 +611,10 @@ export default function MensalidadesPage() {
               variant="primary"
               size="sm"
               className="gap-1.5"
-              disabled={!editId && registeredClients.length === 0}
+              disabled={saving || (!editId && registeredClients.length === 0)}
             >
               <Link2 className="w-3.5 h-3.5 text-[#07100F]" />
-              <span>{editId ? 'Salvar Alterações' : 'Vincular Mensalista'}</span>
+              <span>{saving ? 'Salvando…' : editId ? 'Salvar Alterações' : 'Vincular Mensalista'}</span>
             </Button>
           </div>
         </form>
