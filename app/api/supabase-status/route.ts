@@ -1,8 +1,11 @@
+import { requireCrmApi } from '@/lib/server/crm-auth';
 import { NextResponse } from 'next/server';
 import { createServerSupabase } from '@/lib/supabase/server';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = await requireCrmApi(request);
+  if (denied) return denied;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   const hasKey = Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
   const hasServiceKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);

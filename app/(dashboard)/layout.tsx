@@ -1,42 +1,12 @@
-'use client';
+import { redirect } from 'next/navigation';
+import { crmIdentity } from '@/lib/server/crm-auth';
+import DashboardShell from '@/components/layout/DashboardShell';
 
-import React, { useState } from 'react';
-import { usePathname } from 'next/navigation';
-import { Sidebar } from '@/components/layout/Sidebar';
-import { Topbar } from '@/components/layout/Topbar';
-import { CommandPalette } from '@/components/layout/CommandPalette';
+export const dynamic = 'force-dynamic';
 
-export default function DashboardLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const [isCommandOpen, setIsCommandOpen] = useState(false);
-  const pathname = usePathname();
-  const isBoard = pathname === '/mensagens';
-  const isWhatsApp = pathname === '/whatsapp';
-
-  return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#07100F]">
-      {/* Sidebar Fixa recolhível */}
-      <Sidebar />
-
-      {/* Área Central Principal */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-        {/* Topbar Discreta */}
-        <Topbar onOpenSearch={() => setIsCommandOpen(true)} />
-
-        {/* Conteúdo com iluminação atmosférica sutil */}
-        <main className={isBoard ? 'flex-1 min-h-0 overflow-hidden' : isWhatsApp ? 'flex-1 min-h-0 overflow-hidden p-3 md:p-6' : 'flex-1 overflow-y-auto p-6 md:p-8 evo-atmospheric-glow'}>
-          <div className={isBoard || isWhatsApp ? 'h-full min-h-0 w-full' : 'max-w-7xl mx-auto space-y-8 pb-16'}>{children}</div>
-        </main>
-      </div>
-
-      {/* Command Palette Global (Ctrl + K) */}
-      <CommandPalette
-        isOpen={isCommandOpen}
-        onClose={() => setIsCommandOpen(false)}
-      />
-    </div>
-  );
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  let identity;
+  try { identity = await crmIdentity(); } catch { identity = null; }
+  if (!identity) redirect('/login');
+  return <DashboardShell>{children}</DashboardShell>;
 }

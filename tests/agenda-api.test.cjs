@@ -14,6 +14,7 @@ class CalendarError extends Error { constructor(message, status = 503, code = 'C
 let calls = [], role = 'owner', conflict = false, page = 0;
 const existing = { id: 'event1', etag: '"etag1"', summary: 'Original', description: '', location: '', start: { dateTime: '2026-10-09T14:00:00Z' }, end: { dateTime: '2026-10-09T15:00:00Z' }, attendees: [{ email: 'guest@example.test' }], recurringEventId: 'series' };
 const { POST } = compile('../app/api/agenda/route.ts', {
+  '@/lib/server/crm-auth': { requireCrmApi: async () => null },
   'next/server': { NextResponse: { json: (data, options) => ({ data, status: options?.status || 200 }) } },
   '@/lib/services/calendar-events': compile('../lib/services/calendar-events.ts'),
   '@/lib/server/google-calendar': {

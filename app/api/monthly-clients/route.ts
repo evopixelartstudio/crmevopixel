@@ -1,3 +1,4 @@
+import { requireCrmApi } from '@/lib/server/crm-auth';
 import { NextResponse } from 'next/server';
 import { cloudDatabase } from '@/lib/server/crm-access';
 
@@ -7,7 +8,9 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fields = ['client_id', 'client_name', 'company_name', 'segment', 'plan_name', 'monthly_value', 'billing_day', 'payment_method', 'status', 'current_month_status', 'start_date', 'last_payment_date', 'notes'];
 const normalize = (row: any) => ({ ...row, status: row.subscription_status ?? row.status });
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = await requireCrmApi(request);
+  if (denied) return denied;
   try {
     const { data, error } = await cloudDatabase().from('monthly_clients').select('id,client_id,client_name,company_name,segment,plan_name,monthly_value,billing_day,payment_method,subscription_status,current_month_status,start_date,last_payment_date,notes').order('billing_day');
     if (error) throw error;
@@ -16,7 +19,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  if (request.headers.get('origin') !== new URL(request.url).origin && request.headers.get('origin') !== `https://${request.headers.get('x-forwarded-host') || request.headers.get('host')}`) return NextResponse.json({ error: 'Origem inválida.' }, { status: 403 });
+  const denied = await requireCrmApi(request);
+  if (denied) return denied;
   try {
     const body = await request.json();
     if (!uuid.test(body.id || '') || !['save', 'delete'].includes(body.action)) return NextResponse.json({ error: 'Mensalidade inválida.' }, { status: 400 });

@@ -62,3 +62,10 @@ npm run dev
 # Build de produção
 npm run build
 ```
+## Segurança do CRM
+
+Para a primeira camada com login por e-mail e fechamento da porta 3000, siga [PUBLICAR_LOGIN_CRM.md](docs/PUBLICAR_LOGIN_CRM.md). A autorização no servidor pode usar `CRM_ADMIN_EMAILS` sem criar tabelas; proteger o REST direto do Supabase continua exigindo corrigir os privilégios/RLS.
+
+Siga o [passo a passo manual para Hostinger e Supabase](docs/APLICAR_SEGURANCA_CRM.md). Ele inclui preparação do build, migração de segurança, autorização de `evopixelart@gmail.com` e validação do domínio publicado.
+
+Antes de publicar, aplique a migração de autorização e configure Supabase Auth. Consulte [a auditoria e as instruções de aplicação](docs/AUDITORIA_SEGURANCA_CRM.md). O CRM exige usuário autorizado em `crm_members`; o login GitHub do painel Supabase é independente do login deste aplicativo.

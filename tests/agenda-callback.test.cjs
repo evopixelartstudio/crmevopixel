@@ -9,6 +9,7 @@ let cookieValid = false, mode = 'success', saved = false;
 const scopes = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly';
 const compiled = new Module(filename, module);
 compiled.require = name => ({
+  '@/lib/server/crm-auth': { requireCrmApi: async () => null },
   'next/server': { NextResponse: { redirect: url => ({ location: String(url), cookies: { set: () => {} }, headers: new Headers() }) } },
   '@/lib/server/crm-access': { secretsMatch: (a, b) => a === b, cloudDatabase: () => ({ from: () => ({ insert: async () => { saved = true; return { error: mode === 'database' ? {} : null }; } }) }) },
   '@/lib/server/google-calendar': {

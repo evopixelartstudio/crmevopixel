@@ -5,7 +5,7 @@ const ts = require('typescript');
 const Module = require('node:module');
 const filename = require.resolve('../lib/server/google-calendar.ts');
 const compiled = new Module(filename, module);
-compiled.require = name => name === './crm-access' ? { cloudDatabase: () => { throw new Error('Unexpected database call'); } } : module.require(name);
+compiled.require = name => name === 'server-only' ? {} : name === './crm-access' ? { cloudDatabase: () => { throw new Error('Unexpected database call'); } } : module.require(name);
 compiled._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, filename);
 const { seal, unseal, sessionId, calendarConfig, pkceChallenge, agendaOrigin } = compiled.exports;
 process.env.GOOGLE_CALENDAR_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');

@@ -5,7 +5,7 @@ const ts = require('typescript');
 const Module = require('node:module');
 let saved, fail = false, calls = 0;
 const filename = require.resolve('../app/api/monthly-clients/route.ts'), compiled = new Module(filename, module);
-compiled.require = name => name === 'next/server' ? { NextResponse: { json: (data, options) => ({ data, status: options?.status || 200 }) } } : name === '@/lib/server/crm-access' ? { cloudDatabase: () => { calls++; return { from: () => {
+compiled.require = name => name === '@/lib/server/crm-auth' ? { requireCrmApi: async r => r.headers.get('origin') === 'https://crm.test' ? null : { status: 403 } } : name === 'next/server' ? { NextResponse: { json: (data, options) => ({ data, status: options?.status || 200 }) } } : name === '@/lib/server/crm-access' ? { cloudDatabase: () => { calls++; return { from: () => {
   const q = { upsert: row => { saved = row; return q; }, update: row => { saved = row; return q; }, delete: () => q, eq: () => q, select: () => q, single: async () => ({ data: fail ? null : { ...saved }, error: fail ? {} : null }) }; return q;
 } }; } } : module.require(name);
 compiled._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText,filename);

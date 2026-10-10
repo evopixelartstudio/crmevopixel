@@ -8,7 +8,7 @@ const compiled = new Module(filename, module);
 compiled.filename = filename;
 compiled.paths = module.paths;
 let databaseKey;
-compiled.require = name => name === '@supabase/supabase-js' ? { createClient: (url, key) => { databaseKey = key; return {}; } } : module.require(name);
+compiled.require = name => name === 'server-only' ? {} : name === '@supabase/supabase-js' ? { createClient: (url, key) => { databaseKey = key; return {}; } } : module.require(name);
 compiled._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText, filename);

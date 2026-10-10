@@ -12,7 +12,9 @@ yarn-error.log*
 .gitignore
 
 # Variáveis locais e segredos
-.env*.local
+.env
+.env.*
+!.env.example
 
 # Documentação e testes
 README.md

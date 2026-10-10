@@ -1,3 +1,4 @@
+import { requireCrmApi } from '@/lib/server/crm-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { cloudDatabase, secretsMatch } from '@/lib/server/crm-access';
@@ -7,6 +8,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const denied = await requireCrmApi(request);
+  if (denied) return denied;
   let response: NextResponse;
   let failure = 'config';
   try {

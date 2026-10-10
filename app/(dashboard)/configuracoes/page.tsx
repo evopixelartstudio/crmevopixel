@@ -139,8 +139,6 @@ export default function ConfiguracoesPage() {
 
   // AI Providers State
   const [aiConfig, setAiConfig] = useState<AIProviderConfig>(aiProvider.getConfig());
-  const [showGeminiKey, setShowGeminiKey] = useState(false);
-  const [showClaudeKey, setShowClaudeKey] = useState(false);
   const [isTestingGemini, setIsTestingGemini] = useState(false);
   const [geminiResult, setGeminiResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isTestingClaude, setIsTestingClaude] = useState(false);
@@ -203,7 +201,7 @@ export default function ConfiguracoesPage() {
   useEffect(() => {
     checkSupabaseStatus();
     loadSupabaseConfig();
-    setAiConfig(aiProvider.loadConfig());
+    aiProvider.refreshStatus().then(config => setAiConfig({ ...config }));
   }, []);
 
   const handleSaveAiConfig = () => {
@@ -216,7 +214,7 @@ export default function ConfiguracoesPage() {
     setIsTestingGemini(true);
     setGeminiResult(null);
     try {
-      const res = await aiProvider.testGemini(aiConfig.gemini.apiKey, aiConfig.gemini.model);
+      const res = await aiProvider.testGemini(aiConfig.gemini.model);
       setGeminiResult(res);
       if (res.success) {
         setAiConfig((prev) => ({
@@ -236,7 +234,7 @@ export default function ConfiguracoesPage() {
     setIsTestingClaude(true);
     setClaudeResult(null);
     try {
-      const res = await aiProvider.testClaude(aiConfig.claude.apiKey, aiConfig.claude.model);
+      const res = await aiProvider.testClaude(aiConfig.claude.model);
       setClaudeResult(res);
       if (res.success) {
         setAiConfig((prev) => ({
@@ -761,32 +759,7 @@ export default function ConfiguracoesPage() {
               </a>
             </div>
 
-            <div>
-              <label className="block text-[11px] text-[var(--evo-muted)] mb-1 font-medium">
-                Gemini API Key
-              </label>
-              <div className="relative">
-                <input
-                  type={showGeminiKey ? 'text' : 'password'}
-                  placeholder="AIzaSy..."
-                  value={aiConfig.gemini.apiKey}
-                  onChange={(e) =>
-                    setAiConfig((prev) => ({
-                      ...prev,
-                      gemini: { ...prev.gemini, apiKey: e.target.value },
-                    }))
-                  }
-                  className="w-full pl-3 pr-8 py-2 rounded-xl bg-[var(--evo-card)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none font-mono text-[11px]"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowGeminiKey(!showGeminiKey)}
-                  className="absolute right-2.5 top-2.5 text-[var(--evo-muted)] hover:text-[var(--evo-text)]"
-                >
-                  {showGeminiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-            </div>
+            <p className="text-sm text-[var(--evo-muted)]">{aiConfig.gemini.configured ? 'Chave configurada no servidor.' : 'Solicite ao administrador a configuração da chave no servidor.'}</p>
 
             <div>
               <label className="block text-[11px] text-[var(--evo-muted)] mb-1 font-medium">
@@ -821,7 +794,7 @@ export default function ConfiguracoesPage() {
                 size="sm"
                 className="text-xs gap-1.5"
                 onClick={handleTestGemini}
-                disabled={isTestingGemini || !aiConfig.gemini.apiKey}
+                disabled={isTestingGemini}
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isTestingGemini ? 'animate-spin' : ''}`} />
                 <span>Testar Conexão Gemini</span>
@@ -868,32 +841,7 @@ export default function ConfiguracoesPage() {
               </a>
             </div>
 
-            <div>
-              <label className="block text-[11px] text-[var(--evo-muted)] mb-1 font-medium">
-                Claude API Key
-              </label>
-              <div className="relative">
-                <input
-                  type={showClaudeKey ? 'text' : 'password'}
-                  placeholder="sk-ant-api03-..."
-                  value={aiConfig.claude.apiKey}
-                  onChange={(e) =>
-                    setAiConfig((prev) => ({
-                      ...prev,
-                      claude: { ...prev.claude, apiKey: e.target.value },
-                    }))
-                  }
-                  className="w-full pl-3 pr-8 py-2 rounded-xl bg-[var(--evo-card)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none font-mono text-[11px]"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowClaudeKey(!showClaudeKey)}
-                  className="absolute right-2.5 top-2.5 text-[var(--evo-muted)] hover:text-[var(--evo-text)]"
-                >
-                  {showClaudeKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-            </div>
+            <p className="text-sm text-[var(--evo-muted)]">{aiConfig.claude.configured ? 'Chave configurada no servidor.' : 'Solicite ao administrador a configuração da chave no servidor.'}</p>
 
             <div>
               <label className="block text-[11px] text-[var(--evo-muted)] mb-1 font-medium">
@@ -925,7 +873,7 @@ export default function ConfiguracoesPage() {
                 size="sm"
                 className="text-xs gap-1.5"
                 onClick={handleTestClaude}
-                disabled={isTestingClaude || !aiConfig.claude.apiKey}
+                disabled={isTestingClaude}
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isTestingClaude ? 'animate-spin' : ''}`} />
                 <span>Testar Conexão Claude</span>

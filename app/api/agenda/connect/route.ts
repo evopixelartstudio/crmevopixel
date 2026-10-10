@@ -1,3 +1,4 @@
+import { requireCrmApi } from '@/lib/server/crm-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'node:crypto';
 import { agendaOrigin, calendarConfig, cookieOptions, GOOGLE_SCOPES, OAUTH_COOKIE, pkceChallenge, seal } from '@/lib/server/google-calendar';
@@ -6,6 +7,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(_request: NextRequest) {
+  const denied = await requireCrmApi(_request);
+  if (denied) return denied;
   try {
     const config = calendarConfig();
     const state = randomBytes(32).toString('base64url');

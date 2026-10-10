@@ -1,4 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
+import { publicSupabaseKey } from '@/lib/auth/config';
 
 let runtimeConfig: { url: string; key: string } | null = null;
 
@@ -20,6 +22,7 @@ export function isSupabaseConfigured(): boolean {
   return Boolean(
     c.url &&
     c.key &&
+    publicSupabaseKey(c.key) &&
     !c.url.includes('placeholder') &&
     !c.url.includes('seu-projeto')
   );
@@ -31,12 +34,7 @@ export function getSupabase(): SupabaseClient {
   const c = getInitialConfig();
   if (isSupabaseConfigured()) {
     if (!activeClient) {
-      activeClient = createClient(c.url, c.key, {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: true,
-        },
-      });
+      activeClient = createBrowserClient(c.url, c.key);
     }
     return activeClient;
   }
@@ -48,13 +46,9 @@ export function getSupabase(): SupabaseClient {
 }
 
 export function updateClientConfig(url: string, key: string) {
+  if (!publicSupabaseKey(key)) throw new Error('Use apenas a chave pública anon ou publishable no navegador.');
   runtimeConfig = { url, key };
-  activeClient = createClient(url, key, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: true,
-    },
-  });
+  activeClient = createBrowserClient(url, key, { isSingleton: false });
 }
 
 // Export compatível com código existente

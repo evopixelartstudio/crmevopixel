@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Search } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { LogoutButton } from '@/components/auth/LogoutButton';
 import { isSupabaseConfigured } from '@/lib/supabase/client';
 import { useBrand } from '@/lib/hooks/useBrand';
 
@@ -39,6 +40,7 @@ export function Topbar({ onOpenSearch }: TopbarProps) {
       <div className="flex items-center gap-3">
         {/* Alternador de Tema Dark / Claro */}
         <ThemeToggle />
+        <LogoutButton />
 
         <div className="h-4 w-[1px] bg-[var(--evo-border)] mx-1" />
 

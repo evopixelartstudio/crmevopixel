@@ -1,3 +1,4 @@
+import { requireCrmApi } from '@/lib/server/crm-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { formatWhatsAppNumber, whatsAppPhoneAliases } from '@/lib/utils/whatsapp';
@@ -24,6 +25,8 @@ async function evolution(path: string, body?: unknown) {
 }
 
 export async function POST(request: NextRequest) {
+  const denied = await requireCrmApi(request);
+  if (denied) return denied;
   try {
     const missing = ['EVOLUTION_API_URL', 'EVOLUTION_API_KEY', 'EVOLUTION_INSTANCE'].filter(name => !process.env[name]?.trim());
     if (missing.length) return NextResponse.json({ error: 'A integração do WhatsApp ainda não foi configurada no servidor.', code: 'CONFIG_MISSING', missing }, { status: 503 });

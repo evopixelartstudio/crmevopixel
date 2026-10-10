@@ -7,13 +7,13 @@ export type AIProviderType = 'gemini' | 'claude' | 'simulation';
 export interface AIProviderConfig {
   activeProvider: AIProviderType;
   gemini: {
-    apiKey: string;
+    configured: boolean;
     model: string; // 'gemini-1.5-flash' | 'gemini-1.5-pro'
     temperature: number;
     enabled: boolean;
   };
   claude: {
-    apiKey: string;
+    configured: boolean;
     model: string; // 'claude-3-7-sonnet-20250219' | 'claude-3-5-haiku-20241022'
     temperature: number;
     enabled: boolean;
@@ -29,13 +29,13 @@ Diferencie sempre fatos verificados [DADO], deduções inteligentes [INFERÊNCIA
 export const DEFAULT_AI_CONFIG: AIProviderConfig = {
   activeProvider: 'gemini',
   gemini: {
-    apiKey: '',
+    configured: false,
     model: 'gemini-1.5-flash',
     temperature: 0.4,
     enabled: false,
   },
   claude: {
-    apiKey: '',
+    configured: false,
     model: 'claude-3-7-sonnet-20250219',
     temperature: 0.4,
     enabled: false,
@@ -44,210 +44,43 @@ export const DEFAULT_AI_CONFIG: AIProviderConfig = {
 };
 
 class AIProviderService {
-  private config: AIProviderConfig = { ...DEFAULT_AI_CONFIG };
-
-  constructor() {
-    if (typeof window !== 'undefined') {
-      this.loadConfig();
-    }
-  }
-
+  private config: AIProviderConfig = structuredClone(DEFAULT_AI_CONFIG);
   public loadConfig(): AIProviderConfig { return this.config; }
-
+  public getConfig(): AIProviderConfig { return this.config; }
   public saveConfig(newConfig: Partial<AIProviderConfig>): AIProviderConfig {
-    this.config = {
-      ...this.config,
-      ...newConfig,
-    };
+    this.config = { ...this.config, ...newConfig };
     return this.config;
   }
-
-  public getConfig(): AIProviderConfig {
+  public async refreshStatus(): Promise<AIProviderConfig> {
+    try {
+      const response = await fetch('/api/ai', { cache: 'no-store' });
+      if (response.ok) {
+        const status = await response.json();
+        this.config.gemini.configured = status.gemini === true;
+        this.config.claude.configured = status.claude === true;
+      }
+    } catch { /* A tela permite testar novamente. */ }
     return this.config;
   }
-
-  // Testar conexão com Google Gemini
-  public async testGemini(apiKey: string, model: string = 'gemini-1.5-flash'): Promise<{ success: boolean; message: string }> {
-    if (!apiKey) {
-      return { success: false, message: 'API Key do Gemini não fornecida.' };
-    }
+  private async test(provider: 'gemini' | 'claude', model: string): Promise<{ success: boolean; message: string }> {
     try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: 'Responda apenas: "OK. Conexão Gemini estabelecida com sucesso."' }] }],
-            generationConfig: { maxOutputTokens: 20 },
-          }),
-        }
-      );
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        let extraInfo = '';
-        
-        // Se for erro de NotFound, tentamos buscar a lista de modelos permitidos
-        if (res.status === 404 || errData.error?.message?.includes('not found')) {
-          try {
-            const modelsRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-            if (modelsRes.ok) {
-              const modelsData = await modelsRes.json();
-              const availableModels = modelsData.models
-                ?.filter((m: any) => m.name.includes('gemini') && m.supportedGenerationMethods?.includes('generateContent'))
-                .map((m: any) => m.name.replace('models/', ''))
-                .join(', ');
-              
-              if (availableModels) {
-                extraInfo = `\n\nModelos suportados por essa chave: ${availableModels}. Escolha um desses na lista.`;
-              }
-            }
-          } catch (e) {
-            // ignora erro silencioso
-          }
-        }
-
-        return {
-          success: false,
-          message: `Erro da API Gemini (${res.status}): ${errData.error?.message || 'Chave inválida ou modelo inacessível.'}${extraInfo}`,
-        };
-      }
-
-      const data = await res.json();
-      const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Conectado!';
-      return { success: true, message: reply.trim() };
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : 'Falha de rede';
-      return { success: false, message: `Falha na requisição Gemini: ${errorMsg}` };
-    }
+      const response = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'test', provider, model }) });
+      const data = await response.json();
+      return { success: response.ok, message: response.ok ? data.text : data.error };
+    } catch { return { success: false, message: 'Verifique sua conexão e tente novamente.' }; }
   }
-
-  // Testar conexão com Anthropic Claude
-  public async testClaude(apiKey: string, model: string = 'claude-3-7-sonnet-20250219'): Promise<{ success: boolean; message: string }> {
-    if (!apiKey) {
-      return { success: false, message: 'API Key da Anthropic Claude não fornecida.' };
-    }
-    try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: model || 'claude-3-5-haiku-20241022',
-          max_tokens: 25,
-          messages: [{ role: 'user', content: 'Responda apenas: "OK. Conexão Claude estabelecida com sucesso."' }],
-        }),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        return {
-          success: false,
-          message: `Erro da API Claude (${res.status}): ${errData.error?.message || 'Chave inválida ou sem saldo.'}`,
-        };
-      }
-
-      const data = await res.json();
-      const reply = data.content?.[0]?.text || 'Conectado!';
-      return { success: true, message: reply.trim() };
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : 'Falha de rede';
-      return { success: false, message: `Falha na requisição Claude: ${errorMsg}` };
-    }
-  }
-
-  // Enviar mensagem completa com contexto para o provedor configurado
-  public async generateCompletion(
-    userPrompt: string,
-    contextData: Record<string, unknown>
-  ): Promise<{ text: string; provider: string; model: string }> {
-    const cfg = this.loadConfig();
-
-    const systemPromptWithContext = `${cfg.systemPrompt}\n\n[CONTEXTO ATUAL DO CRM]:\n${JSON.stringify(contextData, null, 2)}`;
-
-    // 1. Google Gemini
-    if (cfg.activeProvider === 'gemini' && cfg.gemini.apiKey) {
+  public testGemini(model = this.config.gemini.model) { return this.test('gemini', model); }
+  public testClaude(model = this.config.claude.model) { return this.test('claude', model); }
+  public async generateCompletion(userPrompt: string, contextData: Record<string, unknown>): Promise<{ text: string; provider: string; model: string }> {
+    const cfg = this.config;
+    if (cfg.activeProvider === 'gemini' || cfg.activeProvider === 'claude') {
+      const options = cfg[cfg.activeProvider];
       try {
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${cfg.gemini.model}:generateContent?key=${cfg.gemini.apiKey}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              systemInstruction: { parts: [{ text: systemPromptWithContext }] },
-              contents: [{ parts: [{ text: userPrompt }] }],
-              generationConfig: {
-                temperature: cfg.gemini.temperature,
-                maxOutputTokens: 800,
-              },
-            }),
-          }
-        );
-
-        if (res.ok) {
-          const data = await res.json();
-          const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (reply) {
-            return {
-              text: reply.trim(),
-              provider: 'Google Gemini',
-              model: cfg.gemini.model,
-            };
-          }
-        }
-      } catch (e) {
-        console.warn('Falha na chamada Gemini, usando fallback:', e);
-      }
+        const response = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'completion', provider: cfg.activeProvider, model: options.model, temperature: options.temperature, systemPrompt: cfg.systemPrompt, userPrompt, contextData }) });
+        if (response.ok) return await response.json();
+      } catch { /* Preserva o motor nativo quando o provedor está indisponível. */ }
     }
-
-    // 2. Anthropic Claude
-    if (cfg.activeProvider === 'claude' && cfg.claude.apiKey) {
-      try {
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'x-api-key': cfg.claude.apiKey,
-            'anthropic-version': '2023-06-01',
-            'content-type': 'application/json',
-            'anthropic-dangerous-direct-browser-access': 'true',
-          },
-          body: JSON.stringify({
-            model: cfg.claude.model,
-            system: systemPromptWithContext,
-            max_tokens: 800,
-            temperature: cfg.claude.temperature,
-            messages: [{ role: 'user', content: userPrompt }],
-          }),
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          const reply = data.content?.[0]?.text;
-          if (reply) {
-            return {
-              text: reply.trim(),
-              provider: 'Anthropic Claude',
-              model: cfg.claude.model,
-            };
-          }
-        }
-      } catch (e) {
-        console.warn('Falha na chamada Claude, usando fallback:', e);
-      }
-    }
-
-    // 3. Fallback inteligente estruturado
-    return {
-      text: `Analisando com motor analítico nativo: "${userPrompt}". O sistema utilizou as métricas estruturadas de faturamento e prospecção registradas no CRM.`,
-      provider: 'Motor Nativo EvoPixel',
-      model: 'Rule-based Pipeline',
-    };
+    return { text: 'O motor nativo analisou a solicitação com as métricas estruturadas disponíveis no CRM.', provider: 'Motor Nativo EvoPixel', model: 'Rule-based Pipeline' };
   }
 }
-
 export const aiProvider = new AIProviderService();

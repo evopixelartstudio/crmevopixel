@@ -20,6 +20,7 @@ test('human takeover disables individual automation, AI preparation cannot chang
 });
 let writes = [], conflict = false;
 const { POST } = compile('../app/api/contacts/route.ts', {
+  '@/lib/server/crm-auth': { requireCrmApi: async r => r.headers.get('origin') === 'https://crm.test' ? null : { status: 403 } },
   'next/server': { NextResponse: { json: (data, options) => ({ data, status: options?.status || 200 }) } },
   '@/lib/services/contact-context': context,
   '@/lib/utils/whatsapp': compile('../lib/utils/whatsapp.ts'),

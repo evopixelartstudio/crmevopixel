@@ -51,6 +51,8 @@ RUN mkdir .next && chown nextjs:nodejs .next
 # Cópia dos artefatos otimizados gerados pelo modo standalone
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/.next/app-build-manifest.json ./.next/app-build-manifest.json
+COPY --from=builder --chown=nextjs:nodejs /app/.next/build-manifest.json ./.next/build-manifest.json
 
 USER nextjs
 

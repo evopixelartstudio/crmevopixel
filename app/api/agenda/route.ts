@@ -1,3 +1,4 @@
+import { requireCrmApi } from '@/lib/server/crm-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { AGENDA_COOKIE, CalendarError, calendarConfig, connection, googleCalendar, sessionId } from '@/lib/server/google-calendar';
 import { eventPayload, normalizeEvent } from '@/lib/services/calendar-events';
@@ -6,6 +7,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
+  const denied = await requireCrmApi(request);
+  if (denied) return denied;
   try {
     const config = calendarConfig();
     if (request.headers.get('origin') !== config.origin) return NextResponse.json({ error: 'Abra a agenda pelo endereço do CRM.' }, { status: 403 });

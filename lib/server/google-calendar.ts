@@ -1,3 +1,4 @@
+import 'server-only';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { cloudDatabase } from './crm-access';

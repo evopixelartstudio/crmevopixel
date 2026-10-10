@@ -1,3 +1,4 @@
+import { requireCrmApi } from '@/lib/server/crm-auth';
 import { NextResponse } from 'next/server';
 import { cloudDatabase } from '@/lib/server/crm-access';
 import { whatsAppPhoneKey } from '@/lib/utils/whatsapp';
@@ -7,8 +8,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
-  const origin = request.headers.get('origin');
-  if (origin !== new URL(request.url).origin && origin !== `https://${request.headers.get('x-forwarded-host') || request.headers.get('host')}`) return NextResponse.json({ error: 'Origem inválida.' }, { status: 403 });
+  const denied = await requireCrmApi(request);
+  if (denied) return denied;
   try {
     const body = await request.json();
     if (typeof body.phone !== 'string' || !/^\d{10,15}$/.test(body.phone) || !['get','update'].includes(body.action)) return NextResponse.json({ error: 'Contato inválido.' }, { status: 400 });

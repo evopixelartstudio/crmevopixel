@@ -1,8 +1,12 @@
+import { requireCrmApi } from '@/lib/server/crm-auth';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { publicSupabaseKey } from '@/lib/auth/config';
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = await requireCrmApi(request);
+  if (denied) return denied;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
   const isConfigured = Boolean(url && anonKey && !url.includes('placeholder') && !url.includes('seu-projeto'));
@@ -45,6 +49,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const denied = await requireCrmApi(request, true);
+  if (denied) return denied;
   try {
     const body = await request.json();
     let { url, anonKey, serviceRoleKey } = body;
@@ -52,6 +58,13 @@ export async function POST(request: Request) {
     url = (url || '').trim().replace(/\/+$/, '');
     anonKey = (anonKey || '').trim();
     serviceRoleKey = (serviceRoleKey || '').trim();
+
+    // Evita SSRF, injeção de linhas no .env e chaves privadas em variáveis públicas.
+    let projectUrl: URL;
+    try { projectUrl = new URL(url); } catch { return NextResponse.json({ error: 'URL inválida.' }, { status: 400 }); }
+    if (projectUrl.protocol !== 'https:' || !/^[a-z0-9-]+\.supabase\.co$/.test(projectUrl.hostname) || projectUrl.port || projectUrl.username || projectUrl.password || projectUrl.pathname !== '/' || projectUrl.search || projectUrl.hash || /[\r\n\s#]/.test(anonKey + serviceRoleKey) || !publicSupabaseKey(anonKey)) {
+      return NextResponse.json({ error: 'Use a URL HTTPS do projeto Supabase e sua chave pública anon/publishable. Segredos são exclusivos do servidor.' }, { status: 400 });
+    }
 
     if (!url || !anonKey) {
       return NextResponse.json(
@@ -109,7 +122,7 @@ export async function POST(request: Request) {
     const updateEnvVar = (content: string, key: string, value: string) => {
       const regex = new RegExp(`^${key}=.*$`, 'm');
       if (regex.test(content)) {
-        return content.replace(regex, `${key}=${value}`);
+        return content.replace(regex, () => `${key}=${value}`);
       } else {
         return content ? `${content.trim()}\n${key}=${value}\n` : `${key}=${value}\n`;
       }

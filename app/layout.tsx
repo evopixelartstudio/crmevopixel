@@ -16,6 +16,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
+  robots: { index: false, follow: false, googleBot: { index: false, follow: false } },
   title: 'EVOCRM — Sistema Operacional Comercial & Operacional da EvoPixel',
   description: 'Plataforma proprietária de gestão comercial, prospecção por nicho, automação n8n e inteligência de vendas da EvoPixel.',
   icons: {

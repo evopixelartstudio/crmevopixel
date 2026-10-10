@@ -13,13 +13,17 @@ services:
     expose:
       - "3000"
     ports:
-      # Porta mapeada para testes locais ou acesso direto na porta 3000.
-      # No VPS atrás do Traefik, o tráfego externo passa via HTTPS (portas 80/443 do Traefik).
-      - "${PORT:-3000}:3000"
+      # Somente loopback: acesso externo exclusivamente pelo proxy HTTPS.
+      # Traefik usa a porta interna pela rede Docker compartilhada.
+      - "127.0.0.1:${PORT:-3000}:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
       - HOSTNAME=0.0.0.0
+      - CRM_ORIGIN=${CRM_ORIGIN:-https://crmevopixel.cloud}
+      - CRM_ADMIN_EMAILS=${CRM_ADMIN_EMAILS-evopixelart@gmail.com}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
       - EVOLUTION_API_URL=${EVOLUTION_API_URL:-}

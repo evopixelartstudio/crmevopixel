@@ -24,7 +24,7 @@ SUPABASE_SERVICE_ROLE_KEY=chave-service-role-do-supabase
 
 Ao carregar uma conversa com a página visível, o CRM marca as mensagens recebidas até aquele momento como lidas no Supabase. Esse estado é compartilhado, como o acesso atual do CRM. Não há armazenamento local nem confirmação de leitura enviada ao WhatsApp. Reenvios do mesmo evento pelo webhook não recriam mensagens nem alteram a leitura já registrada. O histórico no Supabase pode ser consultado mesmo se o aparelho estiver desconectado; o envio exige conexão.
 
-`EVOLUTION_API_KEY` e `SUPABASE_SERVICE_ROLE_KEY` ficam somente no servidor; nunca use o prefixo `NEXT_PUBLIC` nelas. WhatsApp e Rabisco abrem diretamente, sem pedir uma chave adicional. Seus endpoints seguem o acesso aberto atual do CRM. O webhook continua validando `instanceToken` contra o token configurado e persiste a mensagem antes de confirmar o recebimento. As tabelas de conversas e Rabisco não são abertas à chave pública anônima do Supabase.
+`EVOLUTION_API_KEY` e `SUPABASE_SERVICE_ROLE_KEY` ficam somente no servidor; nunca use o prefixo `NEXT_PUBLIC` nelas. WhatsApp e Rabisco usam a sessão autenticada e autorizada do CRM, sem pedir uma chave de integração ao operador. Aplique também `20261010_crm_security.sql` e siga [a configuração de acesso](AUDITORIA_SEGURANCA_CRM.md). O webhook valida `instanceToken` contra o token configurado e persiste a mensagem antes de confirmar o recebimento. As tabelas de conversas e Rabisco não são abertas à chave pública anônima do Supabase.
 
 ## Se aparecer “Configure a integração na VPS”
 
