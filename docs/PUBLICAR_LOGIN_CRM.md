@@ -2,7 +2,11 @@
 
 O caminho mais curto usa o Supabase Auth já integrado, login por e-mail/senha e uma lista de administradores configurada no servidor. Não exige GitHub, tabela de membros ou novas funções SQL para autenticar o aplicativo. Sessão persistente, renovação, logout, validação no servidor das páginas/APIs e bloqueio de indexação já estão implementados.
 
-Na verificação de 10/10/2026, `http://crmevopixel.cloud:3000/leads` respondeu HTTP 200 publicamente. A correção de bind está no compose local e só terá efeito depois de recriar o serviço na VPS. Nenhuma implantação ou SQL foi executada neste trabalho.
+Na verificação inicial de 10/10/2026, `http://crmevopixel.cloud:3000/leads` respondeu HTTP 200 publicamente. Nenhuma implantação ou SQL foi executada naquela verificação.
+
+**Atualização em 11/10/2026:** a revisão `87738ff54dd7c81c1d81d8c272ac6be15136dbc3`, com a correção do salvamento de clientes, a ordem atualizada do pipeline e Node.js 22, foi publicada na VPS. A migração `20261010_clients_persistence.sql` foi executada manualmente pelo usuário e seus campos foram confirmados por consulta sem registros. O serviço usa a imagem `crmevopixel-release:87738ff54dd7`, com a porta publicada em `127.0.0.1:3000`. As verificações anônimas de páginas, APIs, login, indexação, sitemap e webhook passaram. As variáveis do servidor foram preservadas; n8n, Evolution e Traefik continuaram com os mesmos containers. A auditoria de privacidade do banco permanece uma etapa separada, descrita abaixo.
+
+O compose atual da VPS constrói a imagem a partir do GitHub, com `build.context` fixado nessa revisão e `pull_policy: never` para a imagem local. Nas próximas publicações por esse compose, atualize o commit em `build.context` e a tag de `image`, construa a imagem antes de ativá-la e preserve o ambiente existente. Um `git pull` na pasta da VPS, isoladamente, não altera esse contexto de build.
 
 ## O limite da publicação sem SQL
 
