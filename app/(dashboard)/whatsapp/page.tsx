@@ -7,7 +7,7 @@ import { crmService } from '@/lib/services/crm-service';
 import { dbService } from '@/lib/supabase/db-service';
 import { useCrmSync } from '@/lib/hooks/useCrmSync';
 import { formatWhatsAppNumber, whatsAppPhoneKey } from '@/lib/utils/whatsapp';
-import { isNegotiationStage } from '@/lib/services/pipeline-stages';
+import { getVisiblePipelineStages } from '@/lib/services/pipeline-stages';
 import type { WhatsAppMessage } from '@/lib/services/whatsapp-messages';
 import type { PipelineStage } from '@/types/database';
 import type { WhatsAppConversation } from '@/lib/services/whatsapp-inbox';
@@ -89,7 +89,7 @@ export default function WhatsAppPage() {
 
   useEffect(() => {
     let alive = true;
-    void dbService.getPipelineStages().then(data => { if (alive) setStages((data ?? []).filter(s => !isNegotiationStage(s))); });
+    void dbService.getPipelineStages().then(data => { if (alive) setStages(getVisiblePipelineStages(data ?? [])); });
     return () => { alive = false; };
   }, []);
 

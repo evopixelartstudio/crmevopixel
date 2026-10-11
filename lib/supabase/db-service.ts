@@ -148,60 +148,39 @@ export class DatabaseService {
     }
   }
 
-  public async insertClient(client: Client): Promise<boolean> {
-    if (!isSupabaseConfigured()) return false;
+  public async insertClient(client: Client): Promise<Client | null> {
+    if (!isSupabaseConfigured() || !isValidUUID(client.id)) return null;
     try {
       const supabase = getSupabase();
-      
-      // Remover ID mock (ex: 'client-...' ou 'cli-...') para que o Supabase gere o UUID
-      let dataToInsert: any = { ...client };
-      if (dataToInsert.id && (dataToInsert.id.startsWith('client-') || dataToInsert.id.startsWith('cli-'))) {
-        delete dataToInsert.id;
-      }
-
-      let { error } = await supabase.from('clients').upsert([dataToInsert]);
-      if (error) {
-        const { website_url, instagram, google_business, ...fallbackData } = dataToInsert;
-        const retry = await supabase.from('clients').upsert([fallbackData]);
-        error = retry.error;
-      }
+      const { data, error } = await supabase.from('clients')
+        .upsert(client, { onConflict: 'id' }).select('*').single();
       if (error) console.error('Supabase insertClient error:', error);
-      return !error;
+      return !error && data?.id === client.id ? data as Client : null;
     } catch (err) {
       console.error('Supabase insertClient exception:', err);
-      return false;
+      return null;
     }
   }
 
-  public async updateClient(id: string, data: Partial<Client>): Promise<boolean> {
-    if (!isSupabaseConfigured()) return false;
+  public async updateClient(id: string, data: Partial<Client>): Promise<Client | null> {
+    if (!isSupabaseConfigured() || !isValidUUID(id)) return null;
     try {
       const supabase = getSupabase();
-      
-      // Remover ID mock
-      let dataToUpdate: any = { ...data };
-      if (dataToUpdate.id && (dataToUpdate.id.startsWith('client-') || dataToUpdate.id.startsWith('cli-'))) {
-        delete dataToUpdate.id;
-      }
-
-      let { error } = await supabase.from('clients').update(dataToUpdate).eq('id', id);
-      if (error) {
-        const { website_url, instagram, google_business, ...fallbackData } = dataToUpdate;
-        const retry = await supabase.from('clients').update(fallbackData).eq('id', id);
-        error = retry.error;
-      }
-      return !error;
+      const { id: ignoredId, ...payload } = data;
+      const { data: saved, error } = await supabase.from('clients')
+        .update(payload).eq('id', id).select('*').single();
+      return !error && saved?.id === id ? saved as Client : null;
     } catch {
-      return false;
+      return null;
     }
   }
 
   public async deleteClient(id: string): Promise<boolean> {
-    if (!isSupabaseConfigured()) return false;
+    if (!isSupabaseConfigured() || !isValidUUID(id)) return false;
     try {
       const supabase = getSupabase();
-      const { error } = await supabase.from('clients').delete().eq('id', id);
-      return !error;
+      const { data, error } = await supabase.from('clients').delete().eq('id', id).select('id').maybeSingle();
+      return !error && data?.id === id;
     } catch {
       return false;
     }

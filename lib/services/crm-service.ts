@@ -87,6 +87,10 @@ class CrmService {
   private aiFeedbacks: AIFeedback[] = [];
   private initializedFromSupabase = false;
   private leadRevision = 0;
+  private clientRevision = 0;
+  private clientLoadError = '';
+  private clientSyncQueue: Promise<void> = Promise.resolve();
+  private failedClientSyncs: Array<() => Promise<void>> = [];
   private monthlyRevision = 0;
   private monthlyLoadError = '';
   private listeners: Set<() => void> = new Set();
@@ -115,6 +119,7 @@ class CrmService {
   public async initFromSupabase(force = false): Promise<void> {
     if (this.initializedFromSupabase && !force) return;
     const leadRevisionAtStart = this.leadRevision;
+    const clientRevisionAtStart = this.clientRevision;
     const monthlyRevisionAtStart = this.monthlyRevision;
     try {
       const [
@@ -186,7 +191,7 @@ class CrmService {
 
         changed = true;
       }
-      if (clients && clients.length > 0) { 
+      if (clients !== null && clientRevisionAtStart === this.clientRevision) {
         const localClientMap = new Map(this.clients.map(c => [normStr(c.company_name), c]));
         this.clients = clients.map(c => {
           const cNorm = normStr(c.company_name);
@@ -202,7 +207,12 @@ class CrmService {
           };
         });
 
-        changed = true; 
+        this.clientLoadError = '';
+        changed = true;
+      }
+      if (clients === null && clientRevisionAtStart === this.clientRevision) {
+        this.clientLoadError = 'Não foi possível carregar os clientes. Tente novamente.';
+        changed = true;
       }
       if (monthly !== null && monthlyRevisionAtStart === this.monthlyRevision) {
         this.monthlyClients = monthly;
@@ -732,13 +742,14 @@ class CrmService {
         website_url: lead?.website || undefined,
         notes: `Fechado automaticamente pelo Pipeline (${opp.id})`,
       });
-    } else {
-      // Garantir que o cliente exista na lista de clientes mesmo se já estava no histórico
-      const existingClient = this.clients.find(
-        (c) => normStr(c.company_name) === normStr(companyName)
-      );
-      if (!existingClient) {
-        this.addClient({
+    }
+
+    // Executa depois da sincronização do histórico, evitando duas criações concorrentes.
+    const clientId = crypto.randomUUID();
+    this.enqueueClientSync(async () => {
+      let clientRecord = this.clients.find(c => normStr(c.company_name) === normStr(companyName));
+      if (!clientRecord) {
+        clientRecord = await this.addClient({
           name: lead?.name || clientName,
           company_name: companyName,
           segment: lead?.segment || 'Geral',
@@ -753,28 +764,19 @@ class CrmService {
           lifetime_value: projectValue,
           projects_count: 1,
           last_project_at: today,
+        }, clientId);
+      }
+      if (lead) {
+        await this.updateClient(clientRecord.id, {
+          email: clientRecord.email || lead.email,
+          phone: clientRecord.phone || lead.phone,
+          whatsapp: clientRecord.whatsapp || lead.whatsapp,
+          website_url: clientRecord.website_url || lead.website,
+          segment: (!clientRecord.segment || clientRecord.segment === 'Geral') ? lead.segment || clientRecord.segment : clientRecord.segment,
+          name: (!clientRecord.name || clientRecord.name === 'N/A') ? lead.name || clientName : clientRecord.name,
         });
       }
-    }
-
-    // Enriquecer dados de contato do cliente a partir do Lead
-    const clientRecord = this.clients.find(
-      (c) => normStr(c.company_name) === normStr(companyName)
-    );
-    if (clientRecord && lead) {
-      if (!clientRecord.email && lead.email) clientRecord.email = lead.email;
-      if (!clientRecord.phone && lead.phone) clientRecord.phone = lead.phone;
-      if (!clientRecord.whatsapp && lead.whatsapp) clientRecord.whatsapp = lead.whatsapp;
-      if (!clientRecord.website_url && lead.website) clientRecord.website_url = lead.website;
-      if ((!clientRecord.segment || clientRecord.segment === 'Geral') && lead.segment) {
-        clientRecord.segment = lead.segment;
-      }
-      if ((!clientRecord.name || clientRecord.name === 'N/A') && (lead.name || clientName)) {
-        clientRecord.name = lead.name || clientName;
-      }
-
-      dbService.updateClient(clientRecord.id, clientRecord);
-    }
+    });
 
     // 3. Registrar nas Finanças (Lançamento Financeiro)
     const alreadyInFinance = this.transactions.some(
@@ -1080,33 +1082,61 @@ class CrmService {
     return Array.from(urls);
   }
 
-  public addClient(clientData: Omit<Client, 'id'>): Client {
+  public async addClient(clientData: Omit<Client, 'id'>, id = crypto.randomUUID()): Promise<Client> {
     const newClient: Client = {
       ...clientData,
-      id: `cli-${Date.now()}`,
+      id,
     };
-    this.clients.unshift(newClient);
-
-    dbService.insertClient(newClient);
+    const saved = await dbService.insertClient(newClient);
+    if (!saved || saved.id !== id) throw new Error('Não foi possível salvar o cliente no Supabase. Os dados do formulário foram preservados.');
+    this.clients = [saved, ...this.clients.filter(client => client.id !== saved.id)];
+    this.clientRevision++;
     this.notify();
-    return newClient;
+    return saved;
   }
 
-  public updateClient(id: string, data: Partial<Client>): Client | undefined {
-    const client = this.clients.find(c => c.id === id);
-    if (client) {
-      Object.assign(client, data);
-
-      dbService.updateClient(id, data);
-      this.notify();
-    }
-    return client;
+  public async updateClient(id: string, data: Partial<Client>): Promise<Client> {
+    if (!this.clients.some(client => client.id === id)) throw new Error('Cliente não encontrado. Recarregue a lista.');
+    const saved = await dbService.updateClient(id, data);
+    if (!saved || saved.id !== id) throw new Error('Não foi possível salvar as alterações do cliente no Supabase. Tente novamente.');
+    this.clients = this.clients.map(client => client.id === id ? saved : client);
+    this.clientRevision++;
+    this.notify();
+    return saved;
   }
 
-  public deleteClient(id: string): void {
+  public async deleteClient(id: string): Promise<void> {
+    if (!await dbService.deleteClient(id)) throw new Error('Não foi possível excluir o cliente no Supabase. Tente novamente.');
     this.clients = this.clients.filter(c => c.id !== id);
+    this.clientRevision++;
+    this.notify();
+  }
 
-    dbService.deleteClient(id);
+  public getClientError(): string {
+    return this.failedClientSyncs.length > 0
+      ? 'Não foi possível salvar os clientes gerados automaticamente. Tente sincronizar novamente.'
+      : this.clientLoadError;
+  }
+
+  private enqueueClientSync(sync: () => Promise<void>): void {
+    this.clientSyncQueue = this.clientSyncQueue.then(async () => {
+      if (this.failedClientSyncs.length > 0) {
+        this.failedClientSyncs.push(sync);
+        this.notify();
+        return;
+      }
+      await sync();
+    }).catch(() => {
+      this.failedClientSyncs.push(sync);
+      this.notify();
+    });
+  }
+
+  public async retryClientSync(): Promise<void> {
+    await this.clientSyncQueue;
+    const retries = this.failedClientSyncs.splice(0);
+    retries.forEach(sync => this.enqueueClientSync(sync));
+    await this.clientSyncQueue;
     this.notify();
   }
 
@@ -1310,115 +1340,123 @@ class CrmService {
   }
 
   private syncClientWithCompletedProject(proj: Project) {
-    let client = this.clients.find(
-      c =>
-        normStr(c.company_name) === normStr(proj.company_name) ||
-        (c.name && proj.client_name && normStr(c.name) === normStr(proj.client_name))
-    );
-
-    const contracted = proj.amount_contracted || 0;
-    const received = proj.amount_received !== undefined ? proj.amount_received : contracted;
-    const pending = Math.max(0, contracted - received);
-
-    if (!client) {
-      this.addClient({
-        name: proj.client_name || proj.company_name,
-        company_name: proj.company_name,
-        segment: proj.segment || 'Geral',
-        website_url: proj.website_url,
-        status: 'ativo',
-        total_contracted: contracted,
-        total_received: received,
-        total_pending: pending,
-        lifetime_value: received,
-        projects_count: 1,
-        last_project_at: proj.deadline || new Date().toISOString().split('T')[0],
-      });
-    } else {
-      const normCompany = normStr(client.company_name);
-      const histProjects = this.historicalProjects.filter(
-        p => normStr(p.company_name) === normCompany
+    const clientId = crypto.randomUUID();
+    this.enqueueClientSync(async () => {
+      const existing = this.clients.find(
+        c =>
+          normStr(c.company_name) === normStr(proj.company_name) ||
+          (c.name && proj.client_name && normStr(c.name) === normStr(proj.client_name))
       );
-      const completedActiveProjects = this.projects.filter(
-        p => p.status === 'concluido' && normStr(p.company_name) === normCompany
-      );
+      const client = existing ? { ...existing } : undefined;
 
-      const histContracted = histProjects.reduce((sum, p) => sum + (p.amount_contracted || 0), 0);
-      const histReceived = histProjects.reduce((sum, p) => sum + (p.amount_received || 0), 0);
-      const histPending = histProjects.reduce((sum, p) => sum + (p.amount_pending || 0), 0);
+      const contracted = proj.amount_contracted || 0;
+      const received = proj.amount_received !== undefined ? proj.amount_received : contracted;
+      const pending = Math.max(0, contracted - received);
 
-      const activeContracted = completedActiveProjects.reduce((sum, p) => sum + (p.amount_contracted || 0), 0);
-      const activeReceived = completedActiveProjects.reduce(
-        (sum, p) => sum + (p.amount_received !== undefined ? p.amount_received : (p.amount_contracted || 0)),
-        0
-      );
-      const activePending = Math.max(0, activeContracted - activeReceived);
+      if (!client) {
+        await this.addClient({
+          name: proj.client_name || proj.company_name,
+          company_name: proj.company_name,
+          segment: proj.segment || 'Geral',
+          website_url: proj.website_url,
+          status: 'ativo',
+          total_contracted: contracted,
+          total_received: received,
+          total_pending: pending,
+          lifetime_value: received,
+          projects_count: 1,
+          last_project_at: proj.deadline || new Date().toISOString().split('T')[0],
+        }, clientId);
+      } else {
+        const normCompany = normStr(client.company_name);
+        const histProjects = this.historicalProjects.filter(
+          p => normStr(p.company_name) === normCompany
+        );
+        const completedActiveProjects = this.projects.filter(
+          p => p.status === 'concluido' && normStr(p.company_name) === normCompany
+        );
 
-      client.total_contracted = histContracted + activeContracted;
-      client.total_received = histReceived + activeReceived;
-      client.total_pending = histPending + activePending;
-      client.lifetime_value = client.total_received;
-      client.projects_count = histProjects.length + completedActiveProjects.length;
-      client.last_project_at = proj.deadline || new Date().toISOString().split('T')[0];
-      if (proj.website_url) {
-        client.website_url = proj.website_url;
+        const histContracted = histProjects.reduce((sum, p) => sum + (p.amount_contracted || 0), 0);
+        const histReceived = histProjects.reduce((sum, p) => sum + (p.amount_received || 0), 0);
+        const histPending = histProjects.reduce((sum, p) => sum + (p.amount_pending || 0), 0);
+
+        const activeContracted = completedActiveProjects.reduce((sum, p) => sum + (p.amount_contracted || 0), 0);
+        const activeReceived = completedActiveProjects.reduce(
+          (sum, p) => sum + (p.amount_received !== undefined ? p.amount_received : (p.amount_contracted || 0)),
+          0
+        );
+        const activePending = Math.max(0, activeContracted - activeReceived);
+
+        client.total_contracted = histContracted + activeContracted;
+        client.total_received = histReceived + activeReceived;
+        client.total_pending = histPending + activePending;
+        client.lifetime_value = client.total_received;
+        client.projects_count = histProjects.length + completedActiveProjects.length;
+        client.last_project_at = proj.deadline || new Date().toISOString().split('T')[0];
+        if (proj.website_url) {
+          client.website_url = proj.website_url;
+        }
+        if (proj.segment && (!client.segment || client.segment === 'Geral')) {
+          client.segment = proj.segment;
+        }
+
+        await this.updateClient(client.id, client);
       }
-      if (proj.segment && (!client.segment || client.segment === 'Geral')) {
-        client.segment = proj.segment;
-      }
-
-      dbService.updateClient(client.id, client);
-    }
+    });
   }
 
   private syncClientWithHistoricalProject(proj: HistoricalProject) {
-    let client = this.clients.find(
-      c => normStr(c.company_name) === normStr(proj.company_name) || 
-           (c.name && proj.client_name && normStr(c.name) === normStr(proj.client_name))
-    );
-
-    if (!client) {
-      this.addClient({
-        name: proj.client_name || 'N/A',
-        company_name: proj.company_name,
-        segment: proj.segment || 'Geral',
-        website_url: proj.website_url,
-        status: 'ativo',
-        total_contracted: proj.amount_contracted || 0,
-        total_received: proj.amount_received || 0,
-        total_pending: proj.amount_pending || 0,
-        lifetime_value: proj.amount_received || 0,
-        projects_count: 1,
-        last_project_at: proj.project_date,
-      });
-    } else {
-      const normCompany = normStr(client.company_name);
-      const histProjects = this.historicalProjects.filter(p => normStr(p.company_name) === normCompany);
-      const completedActiveProjects = this.projects.filter(
-        p => p.status === 'concluido' && normStr(p.company_name) === normCompany
+    const clientId = crypto.randomUUID();
+    this.enqueueClientSync(async () => {
+      const existing = this.clients.find(
+        c => normStr(c.company_name) === normStr(proj.company_name) ||
+             (c.name && proj.client_name && normStr(c.name) === normStr(proj.client_name))
       );
-      const activeContracted = completedActiveProjects.reduce((sum, p) => sum + (p.amount_contracted || 0), 0);
-      const activeReceived = completedActiveProjects.reduce(
-        (sum, p) => sum + (p.amount_received !== undefined ? p.amount_received : (p.amount_contracted || 0)),
-        0
-      );
-      const activePending = Math.max(0, activeContracted - activeReceived);
+      const client = existing ? { ...existing } : undefined;
 
-      client.total_contracted = histProjects.reduce((sum, p) => sum + (p.amount_contracted || 0), 0) + activeContracted;
-      client.total_received = histProjects.reduce((sum, p) => sum + (p.amount_received || 0), 0) + activeReceived;
-      client.total_pending = histProjects.reduce((sum, p) => sum + (p.amount_pending || 0), 0) + activePending;
-      client.lifetime_value = client.total_received;
-      client.projects_count = histProjects.length + completedActiveProjects.length;
-      client.last_project_at = proj.project_date;
-      if (proj.website_url) {
-        client.website_url = proj.website_url;
-      }
-      if (proj.segment && (!client.segment || client.segment === 'Geral')) {
-        client.segment = proj.segment;
-      }
+      if (!client) {
+        await this.addClient({
+          name: proj.client_name || 'N/A',
+          company_name: proj.company_name,
+          segment: proj.segment || 'Geral',
+          website_url: proj.website_url,
+          status: 'ativo',
+          total_contracted: proj.amount_contracted || 0,
+          total_received: proj.amount_received || 0,
+          total_pending: proj.amount_pending || 0,
+          lifetime_value: proj.amount_received || 0,
+          projects_count: 1,
+          last_project_at: proj.project_date,
+        }, clientId);
+      } else {
+        const normCompany = normStr(client.company_name);
+        const histProjects = this.historicalProjects.filter(p => normStr(p.company_name) === normCompany);
+        const completedActiveProjects = this.projects.filter(
+          p => p.status === 'concluido' && normStr(p.company_name) === normCompany
+        );
+        const activeContracted = completedActiveProjects.reduce((sum, p) => sum + (p.amount_contracted || 0), 0);
+        const activeReceived = completedActiveProjects.reduce(
+          (sum, p) => sum + (p.amount_received !== undefined ? p.amount_received : (p.amount_contracted || 0)),
+          0
+        );
+        const activePending = Math.max(0, activeContracted - activeReceived);
 
-      dbService.updateClient(client.id, client);
-    }
+        client.total_contracted = histProjects.reduce((sum, p) => sum + (p.amount_contracted || 0), 0) + activeContracted;
+        client.total_received = histProjects.reduce((sum, p) => sum + (p.amount_received || 0), 0) + activeReceived;
+        client.total_pending = histProjects.reduce((sum, p) => sum + (p.amount_pending || 0), 0) + activePending;
+        client.lifetime_value = client.total_received;
+        client.projects_count = histProjects.length + completedActiveProjects.length;
+        client.last_project_at = proj.project_date;
+        if (proj.website_url) {
+          client.website_url = proj.website_url;
+        }
+        if (proj.segment && (!client.segment || client.segment === 'Geral')) {
+          client.segment = proj.segment;
+        }
+
+        await this.updateClient(client.id, client);
+      }
+    });
   }
 
   public getHistoricalProjects(): HistoricalProject[] {

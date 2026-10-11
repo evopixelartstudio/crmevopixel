@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import Link from 'next/link';
 import { crmService } from '@/lib/services/crm-service';
 import { useCrmSync } from '@/lib/hooks/useCrmSync';
@@ -51,6 +51,14 @@ export default function ClientesPage() {
   const [cInstagram, setCInstagram] = useState('');
   const [cGoogleBusiness, setCGoogleBusiness] = useState('');
   const [editId, setEditId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState('');
+  const [pageError, setPageError] = useState('');
+  const [isRetrying, setIsRetrying] = useState(false);
+  const operationInProgress = useRef(false);
+  const draftId = useRef<string | null>(null);
+  const clientError = crmService.getClientError();
 
   const findLinkedLead = (companyName?: string, clientName?: string) => {
     const normComp = (companyName || '').trim().toLowerCase();
@@ -62,15 +70,16 @@ export default function ClientesPage() {
     );
   };
 
-  const handleAddClient = () => {
-    if (!cCompany || !cName) {
-      alert('Preencha ao menos o Nome e a Empresa.');
+  const handleAddClient = async () => {
+    if (operationInProgress.current) return;
+    if (!cCompany.trim() || !cName.trim()) {
+      setSaveError('Preencha o nome do contato e a empresa.');
       return;
     }
 
     const payload = {
-      name: cName,
-      company_name: cCompany,
+      name: cName.trim(),
+      company_name: cCompany.trim(),
       segment: cSegment || 'Geral',
       projects_count: 0,
       lifetime_value: 0,
@@ -79,31 +88,46 @@ export default function ClientesPage() {
       total_received: 0,
       status: 'ativo' as const,
       cross_sell_opportunities: [],
-      phone: cPhone,
-      email: cEmail,
-      website_url: cWebsite.trim() || undefined,
-      instagram: cInstagram.trim() || undefined,
-      google_business: cGoogleBusiness.trim() || undefined,
+      phone: cPhone.trim(),
+      whatsapp: cPhone.trim(),
+      email: cEmail.trim(),
+      website_url: cWebsite.trim(),
+      instagram: cInstagram.trim(),
+      google_business: cGoogleBusiness.trim(),
     };
 
-    if (editId) {
-      const existingClient = clients.find((c) => c.id === editId);
-      crmService.updateClient(editId, {
-        ...payload,
-        projects_count: existingClient?.projects_count || 0,
-        lifetime_value: existingClient?.lifetime_value || 0,
-        total_pending: existingClient?.total_pending || 0,
-        total_contracted: existingClient?.total_contracted || 0,
-        total_received: existingClient?.total_received || 0,
-      });
-    } else {
-      crmService.addClient(payload);
-    }
+    operationInProgress.current = true;
+    setIsSaving(true);
+    setSaveError('');
+    try {
+      if (editId) {
+        const existingClient = clients.find((c) => c.id === editId);
+        await crmService.updateClient(editId, {
+          ...payload,
+          projects_count: existingClient?.projects_count || 0,
+          lifetime_value: existingClient?.lifetime_value || 0,
+          total_pending: existingClient?.total_pending || 0,
+          total_contracted: existingClient?.total_contracted || 0,
+          total_received: existingClient?.total_received || 0,
+          cross_sell_opportunities: existingClient?.cross_sell_opportunities || [],
+        });
+      } else {
+        draftId.current ??= crypto.randomUUID();
+        await crmService.addClient(payload, draftId.current);
+      }
 
-    closeModal();
+      closeModal();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Não foi possível salvar o cliente. Tente novamente.');
+    } finally {
+      operationInProgress.current = false;
+      setIsSaving(false);
+    }
   };
 
   const handleEdit = (client: any) => {
+    if (operationInProgress.current) return;
+    setSaveError('');
     const websites = crmService.getClientWebsites(client.company_name, client.website_url);
     const linkedLead = findLinkedLead(client.company_name, client.name);
     setEditId(client.id);
@@ -118,13 +142,26 @@ export default function ClientesPage() {
     setIsModalOpen(true);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
+    if (operationInProgress.current) return;
     if (confirm('Tem certeza que deseja excluir este cliente?')) {
-      crmService.deleteClient(id);
+      operationInProgress.current = true;
+      setDeletingId(id);
+      setPageError('');
+      try {
+        await crmService.deleteClient(id);
+      } catch (error) {
+        setPageError(error instanceof Error ? error.message : 'Não foi possível excluir o cliente. Tente novamente.');
+      } finally {
+        operationInProgress.current = false;
+        setDeletingId(null);
+      }
     }
   };
 
   const closeModal = () => {
+    draftId.current = null;
+    setSaveError('');
     setIsModalOpen(false);
     setEditId(null);
     setCName('');
@@ -200,7 +237,8 @@ export default function ClientesPage() {
 
         <div className="flex items-center gap-3">
           <Button
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => { closeModal(); setIsModalOpen(true); }}
+            disabled={isSaving || deletingId !== null}
             variant="primary"
             size="sm"
             className="gap-1.5"
@@ -210,6 +248,19 @@ export default function ClientesPage() {
           </Button>
         </div>
       </div>
+
+      {(pageError || clientError) && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-300">
+          <span>{pageError || clientError}</span>
+          {clientError && (
+            <Button size="sm" disabled={isRetrying || isSaving || deletingId !== null} onClick={async () => {
+              setIsRetrying(true);
+              try { await crmService.retryClientSync(); await crmService.initFromSupabase(true); }
+              finally { setIsRetrying(false); }
+            }}>{isRetrying ? 'Sincronizando...' : 'Tentar novamente'}</Button>
+          )}
+        </div>
+      )}
 
       {/* Busca */}
       <div className="relative max-w-md">
@@ -392,8 +443,9 @@ export default function ClientesPage() {
                         <button
                           type="button"
                           onClick={() => handleDelete(client.id)}
-                          className="p-1.5 rounded-xl bg-[#10201E] hover:bg-red-500/20 text-[#65706A] hover:text-red-400 transition-colors"
-                          title="Excluir cliente"
+                          disabled={isSaving || deletingId !== null}
+                          className="p-1.5 rounded-xl bg-[#10201E] hover:bg-red-500/20 text-[#65706A] hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          title={deletingId === client.id ? 'Excluindo cliente...' : 'Excluir cliente'}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -416,7 +468,7 @@ export default function ClientesPage() {
       {/* Modal Cadastrar / Editar Cliente */}
       <Modal
         isOpen={isModalOpen}
-        onClose={closeModal}
+        onClose={() => { if (!operationInProgress.current) closeModal(); }}
         title={editId ? 'Editar Cliente' : 'Cadastrar Novo Cliente'}
         subtitle={
           editId
@@ -425,7 +477,8 @@ export default function ClientesPage() {
         }
         maxWidth="md"
       >
-        <div className="space-y-4">
+        <fieldset disabled={isSaving} aria-busy={isSaving} className="space-y-4 min-w-0">
+          {saveError && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">{saveError}</p>}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-[var(--evo-muted)] mb-1">
@@ -542,14 +595,14 @@ export default function ClientesPage() {
             </div>
           </div>
           <div className="pt-4 border-t border-[var(--evo-border)] flex justify-end gap-2">
-            <Button variant="secondary" size="sm" onClick={closeModal}>
+            <Button variant="secondary" size="sm" onClick={closeModal} disabled={isSaving}>
               Cancelar
             </Button>
-            <Button variant="primary" size="sm" onClick={handleAddClient}>
-              {editId ? 'Salvar Alterações' : 'Salvar Cliente'}
+            <Button variant="primary" size="sm" onClick={handleAddClient} disabled={isSaving}>
+              {isSaving ? 'Salvando...' : editId ? 'Salvar Alterações' : 'Salvar Cliente'}
             </Button>
           </div>
-        </div>
+        </fieldset>
       </Modal>
     </div>
   );

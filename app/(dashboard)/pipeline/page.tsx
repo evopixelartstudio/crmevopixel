@@ -1,8 +1,8 @@
 'use client';
 
 import { isStageOverdue } from '@/lib/services/pipeline-age';
-import { ensureFollowUpStages } from '@/lib/services/pipeline-follow-up-stages';
-import { getPipelineStageMap, isNegotiationStage } from '@/lib/services/pipeline-stages';
+import { ensurePipelineStages } from '@/lib/services/pipeline-required-stages';
+import { getPipelineStageMap, getVisiblePipelineStages, resolvePipelineStageEdit } from '@/lib/services/pipeline-stages';
 import { hasEnteredPipeline } from '@/lib/services/pipeline-entry';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -128,7 +128,9 @@ export default function PipelinePage() {
     const timer = setInterval(() => setClockNow(Date.now()), 60000);
     return () => clearInterval(timer);
   }, []);
-  const [stages, setStages] = useState<PipelineStage[]>([]);
+  const [allStages, setAllStages] = useState<PipelineStage[]>([]);
+  const stages = useMemo(() => getVisiblePipelineStages(allStages), [allStages]);
+  const displayStageMap = useMemo(() => getPipelineStageMap(allStages), [allStages]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [leadsList, setLeadsList] = useState<Lead[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -310,10 +312,11 @@ export default function PipelinePage() {
         throw new Error(`Erro ao buscar oportunidades: ${oppsRes.error.message}`);
       }
 
-      const loadedStages = await ensureFollowUpStages((stagesRes.data || []) as PipelineStage[]);
-      const stageMap = getPipelineStageMap(loadedStages);
-      const visibleStages = loadedStages.filter(stage => !isNegotiationStage(stage));
-      setStages(visibleStages);
+      const loadedStages = await ensurePipelineStages((stagesRes.data || []) as PipelineStage[]);
+      getPipelineStageMap(loadedStages);
+      const stageMap = new Map(loadedStages.map(stage => [stage.id, stage]));
+      const visibleStages = getVisiblePipelineStages(loadedStages);
+      setAllStages(loadedStages);
       setNewStageId((prev) => visibleStages.some(stage => stage.id === prev) ? prev : (visibleStages[0]?.id ?? ''));
 
       const parsedLeads: Lead[] =
@@ -420,7 +423,8 @@ export default function PipelinePage() {
   };
 
   const moveStageDirection = (opp: Opportunity, direction: 'prev' | 'next') => {
-    const currentIndex = stages.findIndex((s) => s.id === opp.stage_id);
+    const displayStageId = displayStageMap.get(opp.stage_id || '')?.id || opp.stage_id;
+    const currentIndex = stages.findIndex((s) => s.id === displayStageId);
     if (currentIndex === -1) return;
     const newIndex =
       direction === 'next'
@@ -624,7 +628,7 @@ export default function PipelinePage() {
     setEditingOpp(opp);
     setEditTitle(opp.title || '');
     setEditLeadId(opp.lead_id || '');
-    setEditStageId(opp.stage_id || stages[0]?.id || '');
+    setEditStageId(displayStageMap.get(opp.stage_id || '')?.id || opp.stage_id || stages[0]?.id || '');
     setEditValue(String(opp.estimated_value ?? 0));
     setEditWhatsapp(leadData?.whatsapp || leadData?.phone || '');
     setEditInstagram(leadData?.instagram || '');
@@ -659,7 +663,7 @@ export default function PipelinePage() {
       const payload: Record<string, any> = {
         title: editTitle.trim(),
         lead_id: targetLeadId,
-        stage_id: editStageId || editingOpp.stage_id,
+        stage_id: resolvePipelineStageEdit(editingOpp.stage_id, editStageId, displayStageMap),
         estimated_value: Number(editValue) || 0,
         payment_link: editPaymentLink.trim() || null,
         delivery_days: parseInt(editDeliveryDays, 10) || 7,
@@ -678,7 +682,7 @@ export default function PipelinePage() {
         throw updateRes.error;
       }
 
-      const stageMap = new Map<string, PipelineStage>(stages.map((s) => [s.id, s]));
+      const stageMap = new Map<string, PipelineStage>(allStages.map((s) => [s.id, s]));
       const updatedOpp = mapRowToOpportunity(updateRes.data as SupabaseOpportunityRow, stageMap, leadsList);
 
       const nextOpps = opportunities.map((o) => (o.id === editingOpp.id ? updatedOpp : o));
@@ -996,7 +1000,7 @@ export default function PipelinePage() {
               {stages.map((stage, stageIndex) => {
                 // Filtra estritamente por status = 'aberto' (leads perdidos removidos)
                 const stageOpps = activeOpportunities.filter(
-                  (o) => o.stage_id === stage.id
+                  (o) => (displayStageMap.get(o.stage_id || '')?.id || o.stage_id) === stage.id
                 );
                 const stageTotal = stageOpps.reduce(
                   (acc, o) => acc + (Number(o.estimated_value) || 0),
@@ -1286,7 +1290,7 @@ export default function PipelinePage() {
                     </thead>
                     <tbody className="divide-y divide-[rgba(218,241,222,0.06)] text-[#E7ECE8]">
                       {activeOpportunities.map((opp) => {
-                        const stage = stages.find((s) => s.id === opp.stage_id);
+                        const stage = displayStageMap.get(opp.stage_id || '');
                         const leadData = opp.leads;
 
                         return (
