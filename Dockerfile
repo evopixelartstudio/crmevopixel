@@ -2,8 +2,8 @@
 # Dockerfile Multi-Stage de Produção - EVOCRM (Next.js)
 # ==========================================
 
-# 1. Base com Node.js 20 LTS e Alpine Linux
-FROM node:20-alpine AS base
+# 1. Base com Node.js 22 LTS e Alpine Linux (compatível com Supabase)
+FROM node:22-alpine AS base
 WORKDIR /app
 RUN apk add --no-cache libc6-compat
 
