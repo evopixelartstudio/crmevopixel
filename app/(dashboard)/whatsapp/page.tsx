@@ -12,6 +12,7 @@ import type { WhatsAppMessage } from '@/lib/services/whatsapp-messages';
 import type { PipelineStage } from '@/types/database';
 import type { WhatsAppConversation } from '@/lib/services/whatsapp-inbox';
 import { ContactContextPanel } from '@/components/whatsapp/ContactContextPanel';
+import { ConversationAttendanceControls } from '@/components/whatsapp/ConversationAttendanceControls';
 
 const control = 'rounded-lg border border-[var(--evo-border)] bg-[var(--evo-surface)] px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--evo-accent)] disabled:opacity-50';
 
@@ -208,6 +209,7 @@ export default function WhatsAppPage() {
         {contact ? <>
           <div className="shrink-0 space-y-2 border-b border-[var(--evo-border)] p-4">
             <div className="flex items-center gap-2"><button aria-label="Voltar aos contatos" className={`${control} md:hidden`} onClick={() => setSelected('')}><ArrowLeft size={16} /></button><div className="min-w-0"><h2 className="truncate text-sm font-semibold">{contact.name}</h2><p className="mt-1 text-xs text-[var(--evo-muted)]">+{contact.phone}</p></div></div>
+            <ConversationAttendanceControls key={contact.phone} phone={contact.phone} />
             <div className="flex flex-wrap items-center gap-2">
               {opportunities.length > 1 && <select aria-label="Oportunidade" className={control} value={opportunity?.id ?? ''} onChange={e => setOppId(e.target.value)}>{opportunities.map(o => <option key={o.id} value={o.id}>{o.title}</option>)}</select>}
               {opportunity ? <label className="text-sm">Etapa <select className={control} value={opportunity.stage_slug} disabled={busy || !stages.length} onChange={e => void classify(e.target.value)}>{!stages.some(s => s.slug === opportunity.stage_slug) && <option value={opportunity.stage_slug}>{opportunity.stage_slug}</option>}{stages.map(s => <option key={s.id} value={s.slug}>{s.name}</option>)}</select></label> : <p className="text-sm text-[var(--evo-muted)]">{!contact.clientId && !contact.leadIds.length ? <>Número ainda não cadastrado. <Link href="/leads" className="underline text-[var(--evo-support)]">Cadastrar lead</Link></> : <>Sem oportunidade vinculada. <Link href="/pipeline" className="underline text-[var(--evo-support)]">Cadastrar no pipeline</Link></>}</p>}

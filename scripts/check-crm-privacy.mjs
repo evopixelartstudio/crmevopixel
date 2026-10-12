@@ -12,7 +12,7 @@ try {
     assert.match(response.headers.get('x-robots-tag') || '', /noindex/);
     assert.ok(!(await response.text()).includes('self.__next_f.push'), `${pathname}: hidratação privada`);
   }
-  for (const pathname of ['/api/monthly-clients', '/api/rabisco', '/api/contacts', '/api/supabase-status', '/api/agenda', '/api/whatsapp']) {
+  for (const pathname of ['/api/monthly-clients', '/api/rabisco', '/api/contacts', '/api/supabase-status', '/api/agenda', '/api/whatsapp', '/api/whatsapp/attendance']) {
     const response = await request(pathname);
     assert.equal(response.status, 401, `${pathname}: precisa negar acesso`);
     assert.match(response.headers.get('x-robots-tag') || '', /noindex/);
