@@ -18,6 +18,8 @@ Essa contenção **não fecha políticas permissivas para qualquer usuário aute
 
 ## Procedimento mínimo na Hostinger
 
+**Cadastro e importação sem duplicados:** ao publicar a proteção de telefones, execute antes a migração [`20261016_lead_phone_deduplication.sql`](../supabase/migrations/20261016_lead_phone_deduplication.sql) no Supabase. Ela preserva os cadastros e registra os números para conferir Leads, Clientes, Pipeline e lixeira. Sem essa migração, novos cadastros e importações ficam bloqueados para evitar inclusões sem conferência. O procedimento completo e os limites estão em [LEADS_DUPLICADOS.md](LEADS_DUPLICADOS.md).
+
 1. **Criar o login.** No projeto Supabase correspondente ao CRM, em Authentication → Users, prepare a conta `evopixelart@gmail.com` com e-mail confirmado e senha. Não basta o acesso ao painel Supabase. Não é necessário configurar GitHub. Nas configurações do provedor de e-mail, desabilite novos cadastros públicos se o projeto for exclusivo do CRM; confira antes se outra aplicação depende dessa opção. O aplicativo não possui cadastro público.
 
 2. **Atualizar os arquivos.** Publique o código corrigido pelo processo já usado no VPS. Inclua todos os arquivos novos. Preserve o `.env` existente; não envie `.env`, `.next` ou `node_modules` da máquina local. No Terminal/Web Console da Hostinger, entre na pasta real do CRM, onde está `docker-compose.yml`:

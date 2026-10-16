@@ -54,6 +54,7 @@ import {
   PaymentMethod,
 } from '@/types/database';
 import { dbService } from '@/lib/supabase/db-service';
+import type { LeadImportResult } from '@/lib/services/lead-deduplication';
 
 
 const normStr = (s?: string | null): string => (s || '').trim().toLowerCase();
@@ -448,7 +449,7 @@ class CrmService {
     return lead;
   }
 
-  public addLead(leadData: Omit<Lead, 'id'>): Lead {
+  public async addLead(leadData: Omit<Lead, 'id'>): Promise<Lead> {
     this.leadRevision++;
     const generatedId =
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -458,23 +459,19 @@ class CrmService {
       ...leadData,
       id: generatedId,
     };
-    this.leads.unshift(newLead);
-
+    const inserted = await dbService.insertLead(newLead);
+    if (!inserted) {
+      throw new Error('Não foi possível cadastrar o lead no Supabase. Verifique a conexão e tente novamente.');
+    }
+    // A refresh that started during the write must not erase the confirmed record.
+    this.leadRevision++;
+    this.leads = [inserted, ...this.leads.filter(lead => lead.id !== inserted.id)];
     this.notify();
-
-    dbService.insertLead(newLead).then((inserted) => {
-      if (inserted && inserted.id && inserted.id !== newLead.id) {
-        newLead.id = inserted.id;
-
-        this.notify();
-      }
-    });
-
-    return newLead;
+    return inserted;
   }
 
-  public async addLeads(leadsData: Omit<Lead, 'id'>[]): Promise<void> {
-    if (leadsData.length === 0) return;
+  public async addLeads(leadsData: Omit<Lead, 'id'>[]): Promise<LeadImportResult> {
+    if (leadsData.length === 0) return { created: [], duplicates: [], failed: [], total: 0 };
     this.leadRevision++;
 
     const newLeads: Lead[] = leadsData.map((leadData, index) => ({
@@ -484,8 +481,8 @@ class CrmService {
           ? crypto.randomUUID()
           : `lead-${Date.now()}-${index}`,
     }));
-    const insertedLeads = await Promise.all(newLeads.map(l => dbService.insertLead(l)));
-    const confirmedLeads = insertedLeads.filter((lead): lead is Lead => lead !== null);
+    const result = await dbService.importLeads(newLeads);
+    const confirmedLeads = result.created;
     this.leadRevision++;
     if (confirmedLeads.length > 0) {
       const confirmedIds = new Set(confirmedLeads.map(lead => lead.id));
@@ -493,9 +490,7 @@ class CrmService {
 
       this.notify();
     }
-    if (confirmedLeads.length !== newLeads.length) {
-      throw new Error(`${confirmedLeads.length} de ${newLeads.length} leads salvos no Supabase. A importação não foi concluída. Verifique a conexão e as permissões do banco antes de tentar novamente.`);
-    }
+    return result;
   }
 
   public deleteLead(id: string): void {

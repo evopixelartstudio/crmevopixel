@@ -20,6 +20,9 @@ const inserted = [];
 const updates = [];
 let remoteLeads = [];
 let failLeadInsert = false;
+let leadInsertError = null;
+let pendingLeadInsert = null;
+let importedResult = null;
 let stageSaved = false;
 let stageWrites = 0;
 let monthlySaved = false;
@@ -32,7 +35,19 @@ const dbService = new Proxy({}, {
     if (key === 'insertMonthlyClient') { if (!monthlySaved) return null; monthlyRows.set(args[0].id, args[0]); return args[0]; }
     if (key === 'updateMonthlyClient') { if (!monthlySaved) return null; const saved = { ...monthlyRows.get(args[0]), ...args[1] }; monthlyRows.set(args[0], saved); return saved; }
     if (key === 'deleteMonthlyClient') return monthlySaved;
-    if (key === 'insertLead') { inserted.push(args[0]); return failLeadInsert ? null : args[0]; }
+    if (key === 'insertLead') {
+      inserted.push(args[0]);
+      if (leadInsertError) throw leadInsertError;
+      return pendingLeadInsert || (failLeadInsert ? null : args[0]);
+    }
+    if (key === 'importLeads') {
+      inserted.push(...args[0]);
+      return importedResult || {
+        created: failLeadInsert ? [] : args[0], duplicates: [],
+        failed: failLeadInsert ? args[0].map((_, index) => ({ index, message: 'Falha ao salvar no Supabase' })) : [],
+        total: args[0].length,
+      };
+    }
     if (key === 'updateHistoricalProject') { updates.push(args); return true; }
     if (key === 'saveMonthlyExpense' || key === 'deleteMonthlyExpense') return true;
     if (key === 'updateOpportunityStage') { stageWrites++; return stageSaved; }
@@ -110,7 +125,7 @@ test('manual lead creation survives an in-flight refresh and creates no opportun
   remoteLeads = new Promise(resolve => { resolveLoad = resolve; });
   const loading = crmService.initFromSupabase(true);
   const before = crmService.getOpportunities().length;
-  const lead = crmService.addLead({ name: 'Manual contact', company_name: 'Manual company', status: 'novo' });
+  const lead = await crmService.addLead({ name: 'Manual contact', company_name: 'Manual company', status: 'novo' });
   resolveLoad([]);
   await loading;
   assert.equal(crmService.getLeadById(lead.id).status, 'novo');
@@ -266,14 +281,58 @@ test('historical settlement persists gateway metadata in notes and creates the f
   assert.equal(crmService.getMonthlyExpenses()[0].amount, 5);
 });
 
-test('failed Supabase import rejects and does not publish unpersisted leads', async () => {
+test('failed Supabase import reports failures and does not publish unpersisted leads', async () => {
   const before = [...crmService.getLeads()];
   failLeadInsert = true;
   try {
-    await assert.rejects(crmService.addLeads(parseSpreadsheetLeads([{ Empresa: 'Failed import' }])), /0 de 1 leads salvos/);
+    const result = await crmService.addLeads(parseSpreadsheetLeads([{ Empresa: 'Failed import' }]));
+    assert.equal(result.created.length, 0);
+    assert.equal(result.failed.length, 1);
+    assert.equal(result.total, 1);
     assert.deepEqual(crmService.getLeads(), before);
   } finally {
     failLeadInsert = false;
+  }
+});
+
+test('manual leads stay invisible until confirmed and failed or duplicate writes add nothing', async () => {
+  const before = [...crmService.getLeads()];
+  let resolveInsert;
+  pendingLeadInsert = new Promise(resolve => { resolveInsert = resolve; });
+  const creating = crmService.addLead({ name: 'Pending', company_name: 'Pending', status: 'novo' });
+  assert.deepEqual(crmService.getLeads(), before);
+  resolveInsert(null);
+  await assert.rejects(creating, /Supabase/);
+  pendingLeadInsert = null;
+  assert.deepEqual(crmService.getLeads(), before);
+
+  const { LeadDuplicateError } = require('../lib/services/lead-deduplication.ts');
+  const match = { phone_key: '5568999991234', entity_type: 'lead', entity_id: 'existing', name: 'Existing', company_name: 'Existing', deleted_at: null, location: 'pipeline' };
+  leadInsertError = new LeadDuplicateError([match]);
+  try {
+    await assert.rejects(crmService.addLead({ name: 'Duplicate', company_name: 'Duplicate', status: 'novo', phone: '(68) 99999-1234' }), error => error instanceof LeadDuplicateError && error.duplicates[0] === match);
+    assert.deepEqual(crmService.getLeads(), before);
+  } finally {
+    leadInsertError = null;
+  }
+});
+
+test('imports publish confirmed rows and distinguish duplicate skips from failed writes', async () => {
+  const before = [...crmService.getLeads()];
+  const created = { id: crypto.randomUUID(), name: 'Confirmed', company_name: 'Confirmed', status: 'novo' };
+  importedResult = {
+    created: [created], total: 3,
+    duplicates: [{ phone_key: '5568999991234', entity_type: 'client', entity_id: 'client', name: 'Already client', company_name: 'Already client', deleted_at: null, location: 'clients', inputIndex: 1 }],
+    failed: [{ index: 2, message: 'Falha ao salvar no Supabase' }],
+  };
+  try {
+    const result = await crmService.addLeads(parseSpreadsheetLeads([{ Empresa: 'Confirmed' }, { Empresa: 'Already client' }, { Empresa: 'Failed' }]));
+    assert.equal(result.created.length, 1);
+    assert.equal(result.duplicates.length, 1);
+    assert.equal(result.failed.length, 1);
+    assert.deepEqual(crmService.getLeads(), [created, ...before]);
+  } finally {
+    importedResult = null;
   }
 });
 

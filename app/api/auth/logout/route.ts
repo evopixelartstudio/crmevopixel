@@ -13,6 +13,8 @@ export async function POST(request: Request) {
     const response = NextResponse.json({ success: true });
     response.cookies.set('crm_agenda_session', '', { path: '/', httpOnly: true, maxAge: 0 });
     response.cookies.set('crm_agenda_oauth', '', { path: '/', httpOnly: true, maxAge: 0 });
+    response.cookies.set('crm_ai_gemini', '', { path: '/', httpOnly: true, maxAge: 0 });
+    response.cookies.set('crm_ai_claude', '', { path: '/', httpOnly: true, maxAge: 0 });
     return response;
   } catch { return NextResponse.json({ error: 'Não foi possível sair. Tente novamente.' }, { status: 503 }); }
 }

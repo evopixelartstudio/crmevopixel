@@ -1,6 +1,7 @@
 import { getSupabase, isSupabaseConfigured } from './client';
 import { recoverSpreadsheetBusinessName, recoverSpreadsheetWhatsApp } from '@/lib/services/spreadsheet-leads';
 import { cleanPhoneNumber } from '@/lib/utils/whatsapp';
+import { duplicateMatchesFromDatabase, LeadDuplicateError, type LeadDuplicate, type LeadImportResult } from '@/lib/services/lead-deduplication';
 import {
   Lead,
   Client,
@@ -60,7 +61,8 @@ function sanitizeLeadForSupabase(lead: Partial<Lead>): any {
   if (lead.company_id && isValidUUID(lead.company_id)) payload.company_id = lead.company_id;
   if (lead.niche_id && isValidUUID(lead.niche_id)) payload.niche_id = lead.niche_id;
   if (lead.source_id && isValidUUID(lead.source_id)) payload.source_id = lead.source_id;
-  payload.notes = notes || null;
+  // Partial updates (for example, status changes) must preserve stored notes and metadata.
+  if (lead.notes !== undefined || Object.keys(metadata).length > 0) payload.notes = notes || null;
   payload.updated_at = new Date().toISOString();
 
   return payload;
@@ -215,15 +217,22 @@ export class DatabaseService {
     if (!isSupabaseConfigured()) return null;
     try {
       const supabase = getSupabase();
-      const { data, error } = await supabase
-        .from('leads')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error || !data) {
-        if (error) console.error('Supabase getLeads error:', error);
-        return null;
+      const pageSize = 1000;
+      const leads: Lead[] = [];
+      for (let offset = 0; ; offset += pageSize) {
+        const { data, error } = await supabase
+          .from('leads')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .range(offset, offset + pageSize - 1);
+        if (error || !data) {
+          if (error) console.error('Supabase getLeads error:', error);
+          return null;
+        }
+        leads.push(...data.map(parseLeadFromSupabase));
+        if (data.length < pageSize) return leads;
       }
-      return data.map(parseLeadFromSupabase);
     } catch (err) {
       console.error('Supabase getLeads exception:', err);
       return null;
@@ -231,23 +240,74 @@ export class DatabaseService {
   }
 
   public async insertLead(lead: Lead): Promise<Lead | null> {
-    if (!isSupabaseConfigured()) return null;
-    try {
-      const supabase = getSupabase();
-      const payload = sanitizeLeadForSupabase(lead);
-      const { data, error } = await supabase.from('leads').upsert([payload]).select();
-      if (error) {
-        console.error('Supabase insertLead error:', error);
-        return null;
+    const result = await this.leadsRequest({ action: 'create', lead: sanitizeLeadForSupabase(lead) });
+    return result.lead?.id ? parseLeadFromSupabase(result.lead) : null;
+  }
+
+  public async importLeads(leads: Lead[]): Promise<LeadImportResult> {
+    const combined: LeadImportResult = { created: [], duplicates: [], failed: [], total: leads.length };
+    const encoder = new TextEncoder();
+    const maxRequestBytes = 1_900_000;
+    const envelopeBytes = encoder.encode(JSON.stringify({ action: 'import', leads: [] })).byteLength;
+    let pendingPayload: { value: ReturnType<typeof sanitizeLeadForSupabase>; bytes: number } | undefined;
+    // Bound rows and UTF-8 bytes, preserving chunks already confirmed by the server.
+    for (let offset = 0; offset < leads.length;) {
+      try {
+        const chunk: ReturnType<typeof sanitizeLeadForSupabase>[] = [];
+        let requestBytes = envelopeBytes;
+        while (chunk.length < 200 && offset + chunk.length < leads.length) {
+          if (!pendingPayload) {
+            const value = sanitizeLeadForSupabase(leads[offset + chunk.length]);
+            pendingPayload = { value, bytes: encoder.encode(JSON.stringify(value)).byteLength };
+          }
+          const additionalBytes = pendingPayload.bytes + (chunk.length ? 1 : 0);
+          if (requestBytes + additionalBytes > maxRequestBytes) break;
+          chunk.push(pendingPayload.value);
+          requestBytes += additionalBytes;
+          pendingPayload = undefined;
+        }
+        if (chunk.length === 0) {
+          combined.failed.push({ index: offset, message: 'Esta linha excede o tamanho permitido. Reduza as observações antes de importar novamente.' });
+          pendingPayload = undefined;
+          offset++;
+          continue;
+        }
+        const result = await this.leadsRequest({ action: 'import', leads: chunk });
+        if (!Array.isArray(result.created) || !Array.isArray(result.duplicates) || !Array.isArray(result.failed) || result.total !== chunk.length || result.created.length + result.duplicates.length + result.failed.length !== chunk.length) {
+          throw new Error('Não foi possível confirmar o resultado da importação. Atualize a lista antes de tentar novamente.');
+        }
+        combined.created.push(...result.created.map(parseLeadFromSupabase));
+        combined.duplicates.push(...result.duplicates.map((duplicate: LeadDuplicate) => ({
+          ...duplicate,
+          ...(typeof duplicate.inputIndex === 'number' ? { inputIndex: duplicate.inputIndex + offset } : {}),
+        })));
+        combined.failed.push(...result.failed.map((failure: { index: number; message: string }) => ({
+          ...failure, index: failure.index + offset,
+        })));
+        if (typeof result.withoutPhone === 'number') combined.withoutPhone = (combined.withoutPhone || 0) + result.withoutPhone;
+        offset += chunk.length;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Não foi possível salvar os leads no Supabase.';
+        // Stop after a request failure; no subsequent row has a confirmed write.
+        for (let index = offset; index < leads.length; index++) combined.failed.push({ index, message });
+        break;
       }
-      if (data && data.length > 0) {
-        return parseLeadFromSupabase(data[0]);
-      }
-      return null;
-    } catch (err) {
-      console.error('Supabase insertLead exception:', err);
-      return null;
     }
+    return combined;
+  }
+
+  private async leadsRequest(body: unknown): Promise<any> {
+    const response = await fetch('/api/leads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const result = await response.json();
+    if (response.status === 409) {
+      throw new LeadDuplicateError(Array.isArray(result.duplicates) ? result.duplicates : [], result.error);
+    }
+    if (!response.ok) throw new Error(result.error || 'Não foi possível salvar o lead no Supabase.');
+    return result;
   }
 
   public async updateLead(id: string, data: Partial<Lead>): Promise<boolean> {
@@ -257,9 +317,12 @@ export class DatabaseService {
       const payload = sanitizeLeadForSupabase(data);
       delete payload.id;
       const { error } = await supabase.from('leads').update(payload).eq('id', id);
+      const duplicates = error ? duplicateMatchesFromDatabase(error) : null;
+      if (duplicates) throw new LeadDuplicateError(duplicates);
       if (error) console.error('Supabase updateLead error:', error);
       return !error;
     } catch (err) {
+      if (err instanceof LeadDuplicateError) throw err;
       console.error('Supabase updateLead exception:', err);
       return false;
     }

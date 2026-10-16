@@ -4,8 +4,14 @@ import { isStageOverdue } from '@/lib/services/pipeline-age';
 import { ensurePipelineStages } from '@/lib/services/pipeline-required-stages';
 import { getPipelineStageMap, getVisiblePipelineStages, resolvePipelineStageEdit } from '@/lib/services/pipeline-stages';
 import { hasEnteredPipeline } from '@/lib/services/pipeline-entry';
+import { comparePipelineEntryNewestFirst } from '@/lib/services/pipeline-order';
+import { getLeadRegistrationValues } from '@/lib/services/lead-registration';
+import { persistOpportunityLead, restoreOpportunityLeadStatus } from '@/lib/services/opportunity-registration';
+import { LeadRegistrationFields } from '@/components/leads/LeadRegistrationFields';
+import { LeadDuplicateNotice } from '@/components/leads/LeadDuplicateNotice';
+import { LeadDuplicateError, type LeadDuplicate } from '@/lib/services/lead-deduplication';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getSupabase } from '@/lib/supabase/client';
 import { parseLeadFromSupabase, dbService } from '@/lib/supabase/db-service';
 import { crmService } from '@/lib/services/crm-service';
@@ -144,6 +150,8 @@ export default function PipelinePage() {
   const [selectedStageFilter, setSelectedStageFilter] = useState<string>('todos');
   const [searchTerm, setSearchTerm] = useState('');
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null);
+  const stageScrollContainers = useRef(new Map<string, HTMLDivElement>());
+  const firstCardByStage = useRef(new Map<string, string>());
 
   // Filtros na listagem de Oportunidades Perdidas
   const [lostSearchTerm, setLostSearchTerm] = useState('');
@@ -154,12 +162,17 @@ export default function PipelinePage() {
   const [isSavingNew, setIsSavingNew] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newLeadId, setNewLeadId] = useState<string>('');
+  const [newLeadValues, setNewLeadValues] = useState(getLeadRegistrationValues);
+  const [newOppError, setNewOppError] = useState<string | null>(null);
+  const [newOppDuplicates, setNewOppDuplicates] = useState<LeadDuplicate[]>([]);
   const [newStageId, setNewStageId] = useState<string>('');
   const [newValue, setNewValue] = useState('');
 
   // Modal: Edição e Exclusão
   const [editingOpp, setEditingOpp] = useState<Opportunity | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editOppError, setEditOppError] = useState<string | null>(null);
+  const [editOppDuplicates, setEditOppDuplicates] = useState<LeadDuplicate[]>([]);
   const [deletingOppId, setDeletingOppId] = useState<string | null>(null);
 
   const [editTitle, setEditTitle] = useState('');
@@ -286,30 +299,32 @@ export default function PipelinePage() {
 
       const supabase = getSupabase();
 
-      const [stagesRes, leadsRes] = await Promise.all([
+      const [stagesRes, parsedLeads] = await Promise.all([
         supabase
           .from('pipeline_stages')
           .select('id, name, slug, display_order, color')
           .order('display_order', { ascending: true }),
-        supabase
-          .from('leads')
-          .select('*')
-          .order('created_at', { ascending: false }),
+        dbService.getLeads(),
       ]);
 
       if (stagesRes.error) {
         throw new Error(`Erro ao buscar etapas (pipeline_stages): ${stagesRes.error.message}`);
       }
+      if (parsedLeads === null) {
+        throw new Error('Não foi possível carregar os cadastros de leads. Verifique sua conexão e tente novamente.');
+      }
 
-      // Busca oportunidades com suporte a loss_reason, loss_notes, closed_at, payment_link e delivery_days
-      const oppsRes = await supabase
-        .from('opportunities')
-        .select(
-          '*, leads(*)'
-        );
-
-      if (oppsRes.error) {
-        throw new Error(`Erro ao buscar oportunidades: ${oppsRes.error.message}`);
+      const opportunityRows: SupabaseOpportunityRow[] = [];
+      const pageSize = 1000;
+      for (let offset = 0; ; offset += pageSize) {
+        const result = await supabase.from('opportunities').select('*, leads(*)')
+          .order('created_at', { ascending: false }).order('id', { ascending: false })
+          .range(offset, offset + pageSize - 1);
+        if (result.error || !result.data) {
+          throw new Error(`Não foi possível carregar as oportunidades: ${result.error?.message || 'resposta indisponível'}`);
+        }
+        opportunityRows.push(...result.data as SupabaseOpportunityRow[]);
+        if (result.data.length < pageSize) break;
       }
 
       const loadedStages = await ensurePipelineStages((stagesRes.data || []) as PipelineStage[]);
@@ -319,19 +334,11 @@ export default function PipelinePage() {
       setAllStages(loadedStages);
       setNewStageId((prev) => visibleStages.some(stage => stage.id === prev) ? prev : (visibleStages[0]?.id ?? ''));
 
-      const parsedLeads: Lead[] =
-        !leadsRes.error && leadsRes.data
-          ? leadsRes.data.map((r: any) => parseLeadFromSupabase(r))
-          : [];
       setLeadsList(parsedLeads);
 
-      const loadedOpps = ((oppsRes.data || []) as SupabaseOpportunityRow[]).map((row) =>
+      const loadedOpps = opportunityRows.map((row) =>
         mapRowToOpportunity(row, stageMap, parsedLeads)
       );
-      if (loadedOpps.some(opp => !opp.stage_entered_at)) {
-        throw new Error('Execute supabase/migrations/20261009_crm_cloud_only.sql para registrar o tempo nas etapas do pipeline.');
-      }
-
       setOpportunities(loadedOpps.filter(opp => hasEnteredPipeline(opp, parsedLeads)));
       crmService.setOpportunitiesFromSupabase(loadedOpps);
     } catch (err: any) {
@@ -378,8 +385,22 @@ export default function PipelinePage() {
 
   // Listagens separadas: apenas 'aberto' nas colunas ativas do Kanban
   const activeOpportunities = useMemo(() => {
-    return opportunities.filter(isOpenOpportunity);
+    return opportunities.filter(isOpenOpportunity).sort(comparePipelineEntryNewestFirst);
   }, [opportunities, isOpenOpportunity]);
+
+  useEffect(() => {
+    const nextFirstCards = new Map<string, string>();
+    for (const opportunity of activeOpportunities) {
+      const stageId = displayStageMap.get(opportunity.stage_id || '')?.id || opportunity.stage_id;
+      if (stageId && !nextFirstCards.has(stageId)) nextFirstCards.set(stageId, opportunity.id);
+    }
+    for (const [stageId, firstId] of nextFirstCards) {
+      if (firstCardByStage.current.get(stageId) !== firstId) {
+        stageScrollContainers.current.get(stageId)?.scrollTo({ left: 0 });
+      }
+    }
+    firstCardByStage.current = nextFirstCards;
+  }, [activeOpportunities, displayStageMap, viewMode]);
 
   const lostOpportunities = useMemo(() => {
     return opportunities.filter(isLostOpportunity);
@@ -527,6 +548,7 @@ export default function PipelinePage() {
         status: 'aberto',
         stage_id: defaultStageId,
         stage_slug: firstStage?.slug || '',
+        stage_entered_at: opp.stage_id !== defaultStageId ? new Date().toISOString() : opp.stage_entered_at,
         loss_reason: null,
         loss_notes: null,
         closed_at: null,
@@ -545,28 +567,58 @@ export default function PipelinePage() {
     }
   };
 
+  const resetNewOpportunityForm = () => {
+    setNewTitle('');
+    setNewLeadId('');
+    setNewLeadValues(getLeadRegistrationValues());
+    setNewValue('');
+    setNewPaymentLink('');
+    setNewDeliveryDays('7');
+    setNewOppError(null);
+    setNewOppDuplicates([]);
+    setIsNewOppModalOpen(false);
+  };
+
   // Criar Nova Oportunidade
   const handleCreateOpp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim()) {
-      alert('Preencha o título da oportunidade.');
+    if (isSavingNew) return;
+    const title = newTitle.trim() || newLeadValues.company_name.trim() || newLeadValues.name.trim();
+    if (!title) {
+      setNewOppError('Informe o nome do contato, a empresa ou o título da oportunidade.');
       return;
     }
 
     const stageIdToUse = newStageId || stages[0]?.id;
     if (!stageIdToUse) {
-      alert('Nenhuma etapa encontrada em public.pipeline_stages.');
+      setNewOppError('Nenhuma etapa disponível. Atualize o pipeline e tente novamente.');
       return;
     }
 
     setIsSavingNew(true);
+    setNewOppError(null);
+    setNewOppDuplicates([]);
+    let savedLead: Lead | undefined;
+    let originalLeadStatus: Lead['status'] = 'novo';
+    let opportunityInserted = false;
     try {
       const supabase = getSupabase();
+      const existingLead = newLeadId ? leadsList.find(lead => lead.id === newLeadId) : undefined;
+      if (newLeadId && !existingLead) {
+        throw new Error('O lead selecionado não está mais disponível. Selecione outro cadastro.');
+      }
+      originalLeadStatus = existingLead?.status || 'novo';
+      const persistedLead = await persistOpportunityLead(newLeadValues, existingLead, dbService);
+      savedLead = persistedLead;
+      // Keep the saved lead selected if only the opportunity insert needs to be retried.
+      setNewLeadId(persistedLead.id);
+      setLeadsList(previous => [persistedLead, ...previous.filter(lead => lead.id !== persistedLead.id)]);
+
       const payload: Record<string, any> = {
-        lead_id: newLeadId ? newLeadId : null,
+        lead_id: savedLead.id,
         stage_id: stageIdToUse,
         company_id: null,
-        title: newTitle.trim(),
+        title,
         estimated_value: Number(newValue) || 0,
         probability: 0,
         status: 'aberto',
@@ -585,18 +637,12 @@ export default function PipelinePage() {
       if (insertRes.error) {
         throw insertRes.error;
       }
+      opportunityInserted = true;
 
       const createdData = insertRes.data as SupabaseOpportunityRow;
 
       const stageMap = new Map<string, PipelineStage>(stages.map((s) => [s.id, s]));
-      const createdOpp = mapRowToOpportunity(createdData, stageMap, leadsList);
-
-      if (createdOpp.lead_id) {
-        const lead = crmService.getLeadById(createdOpp.lead_id);
-        if (lead && lead.status !== 'convertido') {
-          crmService.updateLeadStatus(lead.id, 'em_contato');
-        }
-      }
+      const createdOpp = mapRowToOpportunity(createdData, stageMap, [savedLead, ...leadsList]);
 
       const nextOpps = [createdOpp, ...opportunities];
       setOpportunities(nextOpps);
@@ -607,15 +653,29 @@ export default function PipelinePage() {
         crmService.triggerStageSideEffects(createdOpp, chosenStage.slug);
       }
 
-      setNewTitle('');
-      setNewLeadId('');
-      setNewValue('');
-      setNewPaymentLink('');
-      setNewDeliveryDays('7');
-      setIsNewOppModalOpen(false);
+      resetNewOpportunityForm();
+      void crmService.initFromSupabase(true);
     } catch (err: any) {
       console.error('Erro ao inserir oportunidade no Supabase:', err);
-      alert(`Erro ao salvar oportunidade: ${err?.message || 'Erro desconhecido'}`);
+      if (err instanceof LeadDuplicateError) setNewOppDuplicates(err.duplicates);
+      if (opportunityInserted) {
+        resetNewOpportunityForm();
+        showToast('A oportunidade foi criada. Atualize o pipeline para conferir os dados.');
+        void fetchPipelineData();
+        return;
+      }
+      let savedLeadMessage = savedLead ? 'Os dados do lead foram salvos. ' : '';
+      if (savedLead && savedLead.status !== originalLeadStatus) {
+        const restored = await restoreOpportunityLeadStatus(savedLead, originalLeadStatus, dbService).catch(() => false);
+        if (restored) {
+          const restoredLead = { ...savedLead, status: originalLeadStatus };
+          setLeadsList(previous => previous.map(lead => lead.id === restoredLead.id ? restoredLead : lead));
+          savedLeadMessage = 'Os dados do lead foram salvos e o status anterior foi mantido. ';
+        } else {
+          savedLeadMessage = 'Os dados do lead foram salvos, mas o retorno ao status anterior está pendente. Atualize o CRM antes de tentar novamente. ';
+        }
+      }
+      setNewOppError(`${savedLeadMessage}${err?.message || 'Não foi possível criar a oportunidade. Tente novamente.'}`);
     } finally {
       setIsSavingNew(false);
     }
@@ -623,6 +683,8 @@ export default function PipelinePage() {
 
   // Abrir modal de edição
   const handleOpenEditModal = (opp: Opportunity, e?: React.MouseEvent) => {
+    setEditOppError(null);
+    setEditOppDuplicates([]);
     if (e) e.stopPropagation();
     const leadData = opp.leads;
     setEditingOpp(opp);
@@ -640,6 +702,7 @@ export default function PipelinePage() {
   // Salvar edição
   const handleSaveEditOpp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingEdit) return;
     if (!editTitle.trim()) {
       alert('Preencha o título da oportunidade.');
       return;
@@ -647,17 +710,20 @@ export default function PipelinePage() {
     if (!editingOpp) return;
 
     setIsSavingEdit(true);
+    setEditOppError(null);
+    setEditOppDuplicates([]);
     try {
       const supabase = getSupabase();
       const targetLeadId = editLeadId ? editLeadId : null;
 
       if (targetLeadId) {
-        await dbService.updateLead(targetLeadId, {
+        const saved = await dbService.updateLead(targetLeadId, {
           whatsapp: editWhatsapp.trim() || undefined,
           phone: editWhatsapp.trim() || undefined,
           instagram: editInstagram.trim() || undefined,
           google_business: editGoogleBusiness.trim() || undefined,
         });
+        if (!saved) throw new Error('Não foi possível salvar os dados do lead. Verifique a conexão e tente novamente.');
       }
 
       const payload: Record<string, any> = {
@@ -699,7 +765,8 @@ export default function PipelinePage() {
       setEditingOpp(null);
     } catch (err: any) {
       console.error('Erro ao atualizar oportunidade no Supabase:', err);
-      alert(`Erro ao atualizar oportunidade: ${err?.message || 'Erro desconhecido'}`);
+      if (err instanceof LeadDuplicateError) setEditOppDuplicates(err.duplicates);
+      setEditOppError(err?.message || 'Não foi possível atualizar a oportunidade. Tente novamente.');
     } finally {
       setIsSavingEdit(false);
     }
@@ -871,7 +938,7 @@ export default function PipelinePage() {
             Pipeline de Vendas
           </h1>
           <p className="text-xs text-[#9BA6A0] mt-1">
-            Oportunidades sincronizadas diretamente com o Supabase.
+            As entradas mais recentes de cada etapa aparecem primeiro, à esquerda.
           </p>
         </div>
 
@@ -1064,7 +1131,10 @@ export default function PipelinePage() {
                     {/* Cards Lado a Lado no Kanban */}
                     <div className="p-4">
                       {stageOpps.length > 0 ? (
-                        <div className="flex items-stretch gap-3.5 overflow-x-auto pb-2">
+                        <div className="flex items-stretch gap-3.5 overflow-x-auto pb-2" ref={element => {
+                          if (element) stageScrollContainers.current.set(stage.id, element);
+                          else stageScrollContainers.current.delete(stage.id);
+                        }}>
                           {stageOpps.map((opp) => {
                             const leadData = opp.leads;
                             const hasLead = Boolean(leadData);
@@ -1661,128 +1731,137 @@ export default function PipelinePage() {
       {/* ========================================================================= */}
       <Modal
         isOpen={isNewOppModalOpen}
-        onClose={() => setIsNewOppModalOpen(false)}
+        onClose={() => !isSavingNew && setIsNewOppModalOpen(false)}
         title="Nova Oportunidade"
-        subtitle="Salva diretamente em public.opportunities com status aberto."
+        subtitle="Cadastre um lead ou use um existente. Os dados são compartilhados com a página de Leads."
+        maxWidth="2xl"
       >
         <form onSubmit={handleCreateOpp} className="space-y-4 text-xs">
           <div>
-            <label className="block text-[#9BA6A0] mb-1 font-medium">
-              Título da Oportunidade *
+            <label htmlFor="new-opportunity-lead" className="block text-[#9BA6A0] mb-1 font-medium">
+              Cadastro do Lead
             </label>
-            <input
-              type="text"
-              required
-              placeholder="Ex: Website Institucional + Automação WhatsApp"
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
-            />
+            <select
+              id="new-opportunity-lead"
+              value={newLeadId}
+              disabled={isSavingNew}
+              onChange={(e) => {
+                const selectedId = e.target.value;
+                setNewLeadId(selectedId);
+                setNewLeadValues(getLeadRegistrationValues(leadsList.find(lead => lead.id === selectedId)));
+                setNewOppError(null);
+                setNewOppDuplicates([]);
+              }}
+              className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.12)] text-[#E7ECE8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8EB69B] disabled:opacity-60"
+            >
+              <option value="">Cadastrar novo lead</option>
+              {leadsList.map(lead => (
+                <option key={lead.id} value={lead.id}>
+                  {lead.company_name || lead.name}{lead.name && lead.name !== lead.company_name ? ` (${lead.name})` : ''}
+                </option>
+              ))}
+            </select>
+            {newLeadId && <p className="mt-2 text-[#9BA6A0]">As alterações abaixo atualizam o mesmo cadastro usado em Leads.</p>}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">
-                Lead Vinculado (Opcional)
-              </label>
-              <select
-                value={newLeadId}
-                onChange={(e) => {
-                  const selectedId = e.target.value;
-                  setNewLeadId(selectedId);
-                  if (selectedId && !newTitle.trim()) {
-                    const found = leadsList.find((l) => l.id === selectedId);
-                    if (found) {
-                      setNewTitle(`Oportunidade - ${found.company_name || found.name}`);
-                    }
-                  }
-                }}
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
-              >
-                <option value="">Sem lead vinculado (NULL)</option>
-                {leadsList.map((lead) => (
-                  <option key={lead.id} value={lead.id}>
-                    {lead.company_name || lead.name} {lead.name ? `(${lead.name})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <LeadRegistrationFields values={newLeadValues} onChange={setNewLeadValues} niches={crmService.getNiches()} disabled={isSavingNew} />
 
+          <fieldset disabled={isSavingNew} className="space-y-4 border-t border-[rgba(218,241,222,0.08)] pt-4">
             <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">
-                Etapa do Pipeline *
-              </label>
-              <select
-                value={newStageId}
-                onChange={(e) => setNewStageId(e.target.value)}
-                required
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
-              >
-                {stages.map((st) => (
-                  <option key={st.id} value={st.id}>
-                    {st.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">
-                Valor Estimado (R$)
+              <label htmlFor="new-opportunity-title" className="block text-[#9BA6A0] mb-1 font-medium">
+                Título da Oportunidade (opcional)
               </label>
               <input
-                type="number"
-                placeholder="3500"
-                value={newValue}
-                onChange={(e) => setNewValue(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none"
+                id="new-opportunity-title"
+                type="text"
+                placeholder="Usar nome da empresa ou do contato"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.12)] text-[#E7ECE8] placeholder-[#9BA6A0] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8EB69B]"
               />
             </div>
-
-
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="sm:col-span-2">
-              <label className="block text-[#9BA6A0] mb-1 font-medium">
-                Link de Pagamento - Opcional
-              </label>
-              <input
-                type="url"
-                placeholder="Cole o link de pagamento, se houver"
-                value={newPaymentLink}
-                onChange={(e) => setNewPaymentLink(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="new-opportunity-stage" className="block text-[#9BA6A0] mb-1 font-medium">
+                  Etapa do Pipeline *
+                </label>
+                <select
+                  id="new-opportunity-stage"
+                  value={newStageId}
+                  onChange={(e) => setNewStageId(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#9BA6A0] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8EB69B]"
+                >
+                  {stages.map((st) => (
+                    <option key={st.id} value={st.id}>
+                      {st.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="new-opportunity-value" className="block text-[#9BA6A0] mb-1 font-medium">
+                  Valor Estimado (R$)
+                </label>
+                <input
+                  id="new-opportunity-value"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="3500"
+                  value={newValue}
+                  onChange={(e) => setNewValue(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#9BA6A0] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8EB69B]"
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">
-                Prazo Entrega (Dias)
-              </label>
-              <input
-                type="number"
-                min={1}
-                value={newDeliveryDays}
-                onChange={(e) => setNewDeliveryDays(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B]"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
+                <label htmlFor="new-opportunity-payment" className="block text-[#9BA6A0] mb-1 font-medium">
+                  Link de Pagamento - Opcional
+                </label>
+                <input
+                  id="new-opportunity-payment"
+                  type="url"
+                  placeholder="Cole o link de pagamento, se houver"
+                  value={newPaymentLink}
+                  onChange={(e) => setNewPaymentLink(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#9BA6A0] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8EB69B]"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="new-opportunity-delivery" className="block text-[#9BA6A0] mb-1 font-medium">
+                  Prazo Entrega (Dias)
+                </label>
+                <input
+                  id="new-opportunity-delivery"
+                  type="number"
+                  min={1}
+                  value={newDeliveryDays}
+                  onChange={(e) => setNewDeliveryDays(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#9BA6A0] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#8EB69B]"
+                />
+              </div>
             </div>
-          </div>
+          </fieldset>
+
+          {newOppError && <p role="alert" className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-red-200">{newOppError}</p>}
+          <LeadDuplicateNotice duplicates={newOppDuplicates} />
 
           <div className="flex justify-end gap-2 pt-3 border-t border-[rgba(218,241,222,0.06)]">
             <Button
               type="button"
               variant="secondary"
               size="sm"
+              disabled={isSavingNew}
               onClick={() => setIsNewOppModalOpen(false)}
             >
               Cancelar
             </Button>
             <Button type="submit" variant="primary" size="sm" disabled={isSavingNew}>
-              {isSavingNew ? 'Salvando no Supabase...' : 'Criar Oportunidade'}
+              {isSavingNew ? 'Salvando...' : 'Criar Oportunidade'}
             </Button>
           </div>
         </form>
@@ -1793,7 +1872,7 @@ export default function PipelinePage() {
       {/* ========================================================================= */}
       <Modal
         isOpen={Boolean(editingOpp)}
-        onClose={() => setEditingOpp(null)}
+        onClose={() => !isSavingEdit && setEditingOpp(null)}
         title="Editar Oportunidade"
         subtitle="Atualiza diretamente o registro em public.opportunities."
       >
@@ -1916,11 +1995,15 @@ export default function PipelinePage() {
             </div>
           )}
 
+          {editOppError && <p role="alert" className="rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-red-200">{editOppError}</p>}
+          <LeadDuplicateNotice duplicates={editOppDuplicates} />
+
           <div className="flex items-center justify-between pt-3 border-t border-[rgba(218,241,222,0.06)]">
             {editingOpp && (
               <button
                 type="button"
                 onClick={(e) => handleDeleteOpp(editingOpp.id, e)}
+                disabled={isSavingEdit}
                 className="px-3 py-1.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 text-red-400 text-xs flex items-center gap-1.5 transition-all"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -1933,6 +2016,7 @@ export default function PipelinePage() {
                 variant="secondary"
                 size="sm"
                 onClick={() => setEditingOpp(null)}
+                disabled={isSavingEdit}
               >
                 Cancelar
               </Button>

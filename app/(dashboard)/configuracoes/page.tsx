@@ -143,7 +143,11 @@ export default function ConfiguracoesPage() {
   const [geminiResult, setGeminiResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isTestingClaude, setIsTestingClaude] = useState(false);
   const [claudeResult, setClaudeResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [claudeApiKey, setClaudeApiKey] = useState('');
+  const [isSavingAi, setIsSavingAi] = useState(false);
+  const [aiFeedback, setAiFeedback] = useState<{ success: boolean; message: string } | null>(null);
+  const aiBusy = isSavingAi || isTestingGemini || isTestingClaude;
 
   const checkSupabaseStatus = async () => {
     setIsCheckingSupabase(true);
@@ -204,27 +208,46 @@ export default function ConfiguracoesPage() {
     aiProvider.refreshStatus().then(config => setAiConfig({ ...config }));
   }, []);
 
-  const handleSaveAiConfig = () => {
-    aiProvider.saveConfig(aiConfig);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
+  const handleSaveAiConfig = async () => {
+    if (aiBusy) return;
+    setIsSavingAi(true);
+    setAiFeedback(null);
+    try {
+      for (const provider of ['gemini', 'claude'] as const) {
+        const apiKey = (provider === 'gemini' ? geminiApiKey : claudeApiKey).trim();
+        if (!apiKey && aiConfig.activeProvider !== provider) continue;
+        const result = await aiProvider.configureProvider(provider, apiKey, aiConfig[provider].model.trim());
+        if (!result.success) {
+          const label = provider === 'gemini' ? 'Gemini' : 'Claude';
+          setAiFeedback({ success: false, message: `${label}: ${result.message}` });
+          return;
+        }
+      }
+      const status = await aiProvider.refreshStatus();
+      const saved = aiProvider.saveConfig({
+        ...aiConfig,
+        gemini: { ...aiConfig.gemini, configured: status.gemini.configured, enabled: status.gemini.configured },
+        claude: { ...aiConfig.claude, configured: status.claude.configured, enabled: status.claude.configured },
+      });
+      setAiConfig({ ...saved });
+      setGeminiApiKey('');
+      setClaudeApiKey('');
+      setAiFeedback({ success: true, message: 'Configuração de IA salva. Abra o Assistente para consultar os dados do CRM.' });
+    } catch (error) {
+      setAiFeedback({ success: false, message: error instanceof Error ? error.message : 'Não foi possível salvar. Verifique a conexão e tente novamente.' });
+    } finally {
+      setIsSavingAi(false);
+    }
   };
 
   const handleTestGemini = async () => {
     setIsTestingGemini(true);
     setGeminiResult(null);
     try {
-      const res = await aiProvider.testGemini(aiConfig.gemini.model);
+      const res = await aiProvider.testGemini(aiConfig.gemini.model.trim(), geminiApiKey.trim() || undefined);
       setGeminiResult(res);
-      if (res.success) {
-        setAiConfig((prev) => ({
-          ...prev,
-          gemini: { ...prev.gemini, enabled: true },
-        }));
-        aiProvider.saveConfig({
-          gemini: { ...aiConfig.gemini, enabled: true },
-        });
-      }
+    } catch {
+      setGeminiResult({ success: false, message: 'Não foi possível testar a conexão. Tente novamente.' });
     } finally {
       setIsTestingGemini(false);
     }
@@ -234,17 +257,10 @@ export default function ConfiguracoesPage() {
     setIsTestingClaude(true);
     setClaudeResult(null);
     try {
-      const res = await aiProvider.testClaude(aiConfig.claude.model);
+      const res = await aiProvider.testClaude(aiConfig.claude.model.trim(), claudeApiKey.trim() || undefined);
       setClaudeResult(res);
-      if (res.success) {
-        setAiConfig((prev) => ({
-          ...prev,
-          claude: { ...prev.claude, enabled: true },
-        }));
-        aiProvider.saveConfig({
-          claude: { ...aiConfig.claude, enabled: true },
-        });
-      }
+    } catch {
+      setClaudeResult({ success: false, message: 'Não foi possível testar a conexão. Tente novamente.' });
     } finally {
       setIsTestingClaude(false);
     }
@@ -300,12 +316,6 @@ export default function ConfiguracoesPage() {
           </p>
         </div>
 
-        {saveSuccess && (
-          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#163832] text-[#DAF1DE] border border-[#8EB69B]/40 text-xs animate-in fade-in">
-            <CheckCircle2 className="w-4 h-4 text-[#F1F9A1]" />
-            <span>Configurações aplicadas nesta sessão.</span>
-          </div>
-        )}
       </div>
 
       {/* =========================================================================
@@ -633,11 +643,11 @@ export default function ConfiguracoesPage() {
                 <h3 className="text-sm font-semibold text-[var(--evo-text)] font-heading">
                   Provedores de Inteligência Artificial (Claude & Gemini)
                 </h3>
-                <Badge variant={aiConfig.activeProvider === 'simulation' ? 'frio' : 'quente'}>
+                <Badge variant={aiConfig.activeProvider === 'simulation' || !aiConfig[aiConfig.activeProvider].configured ? 'frio' : 'quente'}>
                   {aiConfig.activeProvider === 'gemini'
-                    ? 'Google Gemini Ativo'
+                    ? `Gemini ${aiConfig.gemini.configured ? 'conectado' : 'sem chave'}`
                     : aiConfig.activeProvider === 'claude'
-                    ? 'Anthropic Claude Ativo'
+                    ? `Claude ${aiConfig.claude.configured ? 'conectado' : 'sem chave'}`
                     : 'Modo Simulação'}
                 </Badge>
               </div>
@@ -653,13 +663,24 @@ export default function ConfiguracoesPage() {
               size="sm"
               className="text-xs gap-1.5"
               onClick={handleSaveAiConfig}
+              disabled={aiBusy}
             >
-              <Save className="w-3.5 h-3.5" />
-              <span>Aplicar Chaves de IA nesta sessão</span>
+              {isSavingAi ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              <span>{isSavingAi ? 'Validando e salvando...' : 'Salvar configuração de IA'}</span>
             </Button>
           </div>
         </div>
 
+        {aiFeedback && (
+          <div role={aiFeedback.success ? 'status' : 'alert'} className={`flex items-start gap-2 p-3 rounded-xl border text-xs leading-relaxed ${aiFeedback.success ? 'bg-[#163832] border-[#8EB69B]/40 text-[#DAF1DE]' : 'bg-red-950/20 border-red-800/40 text-red-200'}`}>
+            {aiFeedback.success ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+            <span>{aiFeedback.message}</span>
+          </div>
+        )}
+        <p className="text-xs text-[var(--evo-muted)] leading-relaxed">
+          Cole a chave do provedor que deseja usar. Ela fica protegida na sessão deste navegador e é removida ao sair da conta. Deixe o campo vazio para manter uma chave já configurada.
+        </p>
+        <fieldset disabled={aiBusy} className="space-y-6 disabled:opacity-70">
         {/* Seleção do Motor Ativo */}
         <div className="space-y-2">
           <label className="text-xs font-heading font-semibold text-[var(--evo-text)]">
@@ -686,7 +707,7 @@ export default function ConfiguracoesPage() {
                 )}
               </div>
               <p className="text-[10px] text-[var(--evo-muted)]">
-                Gemini 2.5 Flash & 1.5 Pro. Alto desempenho e janela de contexto estendida.
+                Consulte e analise os dados do CRM com o Google Gemini.
               </p>
             </button>
 
@@ -710,7 +731,7 @@ export default function ConfiguracoesPage() {
                 )}
               </div>
               <p className="text-[10px] text-[var(--evo-muted)]">
-                Claude 3.7 Sonnet & 3.5 Haiku. Precisão analítica superior e raciocínio editorial.
+                Consulte e analise os dados do CRM com o Anthropic Claude.
               </p>
             </button>
 
@@ -759,14 +780,27 @@ export default function ConfiguracoesPage() {
               </a>
             </div>
 
-            <p className="text-sm text-[var(--evo-muted)]">{aiConfig.gemini.configured ? 'Chave configurada no servidor.' : 'Solicite ao administrador a configuração da chave no servidor.'}</p>
+            <div>
+              <label htmlFor="gemini-api-key" className="block text-xs text-[var(--evo-text)] mb-1.5 font-medium">Chave da API Gemini</label>
+              <input
+                id="gemini-api-key"
+                type="password"
+                autoComplete="new-password"
+                spellCheck={false}
+                value={geminiApiKey}
+                onChange={(e) => { setGeminiApiKey(e.target.value); setGeminiResult(null); setAiFeedback(null); }}
+                placeholder={aiConfig.gemini.configured ? 'Chave configurada. Cole outra para substituir.' : 'Cole sua chave do Google AI Studio'}
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-card)] border border-[var(--evo-border)] text-[var(--evo-text)] placeholder:text-[var(--evo-muted)] focus:outline-none focus:ring-2 focus:ring-[#8EB69B] text-xs"
+              />
+            </div>
 
             <div>
-              <label className="block text-[11px] text-[var(--evo-muted)] mb-1 font-medium">
+              <label htmlFor="gemini-model" className="block text-[11px] text-[var(--evo-muted)] mb-1 font-medium">
                 Modelo do Gemini
               </label>
               <input
                 type="text"
+                id="gemini-model"
                 list="gemini-models"
                 value={aiConfig.gemini.model}
                 onChange={(e) =>
@@ -775,16 +809,11 @@ export default function ConfiguracoesPage() {
                     gemini: { ...aiConfig.gemini, model: e.target.value },
                   })
                 }
-                placeholder="Ex: gemini-3.6-flash"
-                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-card)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none text-xs"
+                placeholder="Ex: gemini-2.5-flash"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-card)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:ring-2 focus:ring-[#8EB69B] text-xs"
               />
               <datalist id="gemini-models">
-                <option value="gemini-3.6-flash">gemini-3.6-flash (Recomendado)</option>
-                <option value="gemini-3.8-flash">gemini-3.8-flash (Último)</option>
-                <option value="gemini-flash-latest">gemini-flash-latest (Automático)</option>
-                <option value="gemini-2.5-flash">gemini-2.5-flash (Estável)</option>
-                <option value="gemini-1.5-flash">gemini-1.5-flash (Legado)</option>
-                <option value="gemini-1.0-pro">gemini-1.0-pro (Legado Antigo)</option>
+                <option value="gemini-2.5-flash" />
               </datalist>
             </div>
 
@@ -794,10 +823,10 @@ export default function ConfiguracoesPage() {
                 size="sm"
                 className="text-xs gap-1.5"
                 onClick={handleTestGemini}
-                disabled={isTestingGemini}
+                disabled={aiBusy}
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isTestingGemini ? 'animate-spin' : ''}`} />
-                <span>Testar Conexão Gemini</span>
+                <span>{isTestingGemini ? 'Testando Gemini...' : 'Testar conexão Gemini'}</span>
               </Button>
 
               {geminiResult && (
@@ -813,7 +842,8 @@ export default function ConfiguracoesPage() {
 
             {geminiResult && (
               <div
-                className={`p-2.5 rounded-lg text-[10px] leading-relaxed border ${
+                role={geminiResult.success ? 'status' : 'alert'}
+                className={`p-2.5 rounded-lg text-xs leading-relaxed border ${
                   geminiResult.success
                     ? 'bg-[#10201E] text-[#DAF1DE] border-[#8EB69B]/30'
                     : 'bg-red-950/20 text-red-300 border-red-800/30'
@@ -841,14 +871,27 @@ export default function ConfiguracoesPage() {
               </a>
             </div>
 
-            <p className="text-sm text-[var(--evo-muted)]">{aiConfig.claude.configured ? 'Chave configurada no servidor.' : 'Solicite ao administrador a configuração da chave no servidor.'}</p>
+            <div>
+              <label htmlFor="claude-api-key" className="block text-xs text-[var(--evo-text)] mb-1.5 font-medium">Chave da API Claude</label>
+              <input
+                id="claude-api-key"
+                type="password"
+                autoComplete="new-password"
+                spellCheck={false}
+                value={claudeApiKey}
+                onChange={(e) => { setClaudeApiKey(e.target.value); setClaudeResult(null); setAiFeedback(null); }}
+                placeholder={aiConfig.claude.configured ? 'Chave configurada. Cole outra para substituir.' : 'Cole sua chave do Console Anthropic'}
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-card)] border border-[var(--evo-border)] text-[var(--evo-text)] placeholder:text-[var(--evo-muted)] focus:outline-none focus:ring-2 focus:ring-[#8EB69B] text-xs"
+              />
+            </div>
 
             <div>
-              <label className="block text-[11px] text-[var(--evo-muted)] mb-1 font-medium">
+              <label htmlFor="claude-model" className="block text-[11px] text-[var(--evo-muted)] mb-1 font-medium">
                 Modelo do Claude
               </label>
               <input
                 type="text"
+                id="claude-model"
                 list="claude-models"
                 value={aiConfig.claude.model}
                 onChange={(e) =>
@@ -857,13 +900,11 @@ export default function ConfiguracoesPage() {
                     claude: { ...prev.claude, model: e.target.value },
                   }))
                 }
-                placeholder="Ex: claude-3-7-sonnet-20250219"
-                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-card)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none text-xs"
+                placeholder="Ex: claude-sonnet-4-6"
+                className="w-full px-3 py-2 rounded-xl bg-[var(--evo-card)] border border-[var(--evo-border)] text-[var(--evo-text)] focus:outline-none focus:ring-2 focus:ring-[#8EB69B] text-xs"
               />
               <datalist id="claude-models">
-                <option value="claude-3-7-sonnet-20250219">claude-3-7-sonnet-20250219 (Estado da Arte)</option>
-                <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet-20241022 (Equilibrado)</option>
-                <option value="claude-3-5-haiku-20241022">claude-3-5-haiku-20241022 (Ultrarrápido)</option>
+                <option value="claude-sonnet-4-6" />
               </datalist>
             </div>
 
@@ -873,10 +914,10 @@ export default function ConfiguracoesPage() {
                 size="sm"
                 className="text-xs gap-1.5"
                 onClick={handleTestClaude}
-                disabled={isTestingClaude}
+                disabled={aiBusy}
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isTestingClaude ? 'animate-spin' : ''}`} />
-                <span>Testar Conexão Claude</span>
+                <span>{isTestingClaude ? 'Testando Claude...' : 'Testar conexão Claude'}</span>
               </Button>
 
               {claudeResult && (
@@ -892,7 +933,8 @@ export default function ConfiguracoesPage() {
 
             {claudeResult && (
               <div
-                className={`p-2.5 rounded-lg text-[10px] leading-relaxed border ${
+                role={claudeResult.success ? 'status' : 'alert'}
+                className={`p-2.5 rounded-lg text-xs leading-relaxed border ${
                   claudeResult.success
                     ? 'bg-[#10201E] text-[#DAF1DE] border-[#8EB69B]/30'
                     : 'bg-red-950/20 text-red-300 border-red-800/30'
@@ -903,6 +945,7 @@ export default function ConfiguracoesPage() {
             )}
           </div>
         </div>
+        </fieldset>
       </Card>
 
 

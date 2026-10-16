@@ -30,7 +30,7 @@ ENV NODE_ENV=production
 RUN npm run build
 
 # 4. Estágio final de execução (Runner ultraleve)
-FROM node:20-alpine AS runner
+FROM base AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

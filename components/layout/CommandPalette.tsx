@@ -1,36 +1,45 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   Search,
   Users,
   Building2,
-  FileText,
   Layers,
   Sparkles,
   X,
-  Zap,
-  HelpCircle,
   ArrowRight,
   Target,
   CheckCircle2,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { crmService } from '@/lib/services/crm-service';
-import { assistantTools } from '@/lib/services/assistant-tools';
+import { assistantTools, ToolExecutionResult } from '@/lib/services/assistant-tools';
+import { searchCrmLeads } from '@/lib/services/assistant-lead-search';
+import { aiProvider, AIProviderConfig } from '@/lib/ai/ai-provider';
+import { Lead } from '@/types/database';
 
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-type Mode = 'BUSCA' | 'AÇÃO';
+type Mode = 'BUSCA' | 'ASSISTENTE';
 
 export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [activeMode, setActiveMode] = useState<Mode>('BUSCA');
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [result, setResult] = useState<ToolExecutionResult | null>(null);
+  const [submittedQuery, setSubmittedQuery] = useState('');
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [aiConfig, setAiConfig] = useState<AIProviderConfig>(aiProvider.getConfig());
+  const [isCheckingAi, setIsCheckingAi] = useState(false);
+  const [history, setHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -41,32 +50,31 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
       if (e.key === 'Escape' && isOpen) {
         onClose();
       }
+      if (e.key === 'Tab' && isOpen && dialogRef.current) {
+        const controls = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), [tabindex="0"]'))
+          .filter((element) => element.getClientRects().length > 0);
+        const first = controls[0], last = controls[controls.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  // Detecção de ação direta conforme digitação
   useEffect(() => {
-    const text = query.toLowerCase().trim();
-    if (!text) {
-      setActiveMode('BUSCA');
-      return;
-    }
-
-    if (
-      text.includes('pagou') ||
-      text.includes('pagamento') ||
-      text.startsWith('crie') ||
-      text.startsWith('criar') ||
-      text.startsWith('exclua') ||
-      text.includes('tarefa')
-    ) {
-      setActiveMode('AÇÃO');
-    } else {
-      setActiveMode('BUSCA');
-    }
-  }, [query]);
+    if (!isOpen) return;
+    let current = true;
+    setIsCheckingAi(true);
+    aiProvider.refreshStatus().then((config) => {
+      if (current) setAiConfig({ ...config });
+    }).catch(() => {
+      if (current) setAiConfig({ ...aiProvider.getConfig() });
+    }).finally(() => {
+      if (current) setIsCheckingAi(false);
+    });
+    return () => { current = false; };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -76,12 +84,12 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   const opportunities = crmService.getOpportunities();
   const services = crmService.getServices();
 
-  const filteredLeads = leads.filter(
-    (l) =>
-      l.name.toLowerCase().includes(query.toLowerCase()) ||
-      l.company_name.toLowerCase().includes(query.toLowerCase()) ||
-      l.segment.toLowerCase().includes(query.toLowerCase())
-  );
+  const filteredLeads = searchCrmLeads(leads, { query });
+  const resultData = result?.data;
+  const resultLeads: Lead[] = result?.tool === 'search_leads' && resultData && typeof resultData === 'object' && 'leads' in resultData && Array.isArray(resultData.leads)
+    ? resultData.leads
+    : result?.tool === 'get_leads_attention' && Array.isArray(resultData) ? resultData : [];
+  const providerReady = aiConfig.activeProvider !== 'simulation' && aiConfig[aiConfig.activeProvider].configured;
 
   const filteredClients = clients.filter(
     (c) =>
@@ -114,70 +122,66 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   };
 
   const handleExecuteActionInline = async () => {
-    const parsed = assistantTools.parseIntent(query);
-    const result = await assistantTools.executeTool(
-      parsed.toolName,
-      parsed.params,
-      'palette-session',
-      query
-    );
-    setActionSuccess(result.message);
-    setTimeout(() => {
-      setActionSuccess(null);
-      onClose();
-    }, 2500);
+    if (!query.trim() || isExecuting) return;
+    const input = query.trim();
+    setActiveMode('ASSISTENTE');
+    setSubmittedQuery(input);
+    setResult(null);
+    setIsExecuting(true);
+    try {
+      const parsed = assistantTools.parseIntent(input);
+      const response = await assistantTools.executeTool(parsed.toolName, { ...parsed.params, history }, 'palette-session', input);
+      setResult(response);
+      if (response.success) setHistory((previous) => [...previous, { role: 'user' as const, content: input }, { role: 'assistant' as const, content: response.message }].slice(-8));
+    } catch (error) {
+      setResult({ tool: 'assistant', permissionLevel: 'READ', success: false, source: [], message: error instanceof Error ? error.message : 'Não foi possível consultar o CRM. Tente novamente.' });
+    } finally {
+      setIsExecuting(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4">
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-8 sm:pt-20 p-4">
       <div
         className="fixed inset-0 bg-[#050706]/85 backdrop-blur-[4px] transition-opacity"
         onClick={onClose}
       />
 
-      <div className="relative w-full max-w-2xl bg-[#0C1A19] border border-[rgba(218,241,222,0.14)] rounded-2xl shadow-2xl overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-150">
-        {/* Toast de Ação Executada */}
-        {actionSuccess && (
-          <div className="p-3 bg-[#163832] border-b border-[#8EB69B]/30 text-xs text-[#E7ECE8] flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-[#F1F9A1]" />
-            <span>{actionSuccess}</span>
-          </div>
-        )}
-
-        {/* Barra de Modos: BUSCA, AÇÃO */}
-        <div className="flex items-center justify-between px-4 py-2 bg-[#050706]/80 border-b border-[rgba(218,241,222,0.06)] text-[10px] font-mono">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Busca e Assistente do CRM" className="relative w-full max-w-2xl max-h-[calc(100dvh-4rem)] sm:max-h-[calc(100dvh-7rem)] flex flex-col bg-[#0C1A19] border border-[rgba(218,241,222,0.14)] rounded-2xl shadow-2xl overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-150">
+        <div className="flex shrink-0 items-center justify-between px-4 py-2 bg-[#050706]/80 border-b border-[rgba(218,241,222,0.06)] text-xs">
           <div className="flex items-center gap-2">
-            <span className="text-[#65706A]">MODO:</span>
             <button
               onClick={() => setActiveMode('BUSCA')}
+              aria-pressed={activeMode === 'BUSCA'}
               className={`px-2.5 py-0.5 rounded-md transition-colors ${
                 activeMode === 'BUSCA'
                   ? 'bg-[#10201E] text-[#8EB69B] border border-[rgba(218,241,222,0.12)]'
-                  : 'text-[#65706A] hover:text-[#9BA6A0]'
+                  : 'text-[#9BA6A0] hover:text-[#E7ECE8]'
               }`}
             >
-              BUSCA
+              Busca
             </button>
             <button
-              onClick={() => setActiveMode('AÇÃO')}
+              onClick={() => setActiveMode('ASSISTENTE')}
+              aria-pressed={activeMode === 'ASSISTENTE'}
               className={`px-2.5 py-0.5 rounded-md transition-colors flex items-center gap-1 ${
-                activeMode === 'AÇÃO'
+                activeMode === 'ASSISTENTE'
                   ? 'bg-[#163832] text-[#F1F9A1] border border-[#8EB69B]/30'
-                  : 'text-[#65706A] hover:text-[#9BA6A0]'
+                  : 'text-[#9BA6A0] hover:text-[#E7ECE8]'
               }`}
             >
-              <Zap className="w-2.5 h-2.5" />
-              <span>AÇÃO</span>
+              <Sparkles className="w-3 h-3" />
+              <span>Assistente</span>
             </button>
           </div>
 
-          <span className="text-[#65706A] hidden sm:inline">Pressione ESC para fechar</span>
+          <span className="text-[#9BA6A0] hidden sm:inline">Esc para fechar</span>
         </div>
 
         {/* Campo de Busca / Comando */}
-        <div className="flex items-center px-4 py-3.5 border-b border-[rgba(218,241,222,0.08)] bg-[#07100F]/70">
-          {activeMode === 'AÇÃO' ? (
-            <Zap className="w-4 h-4 text-[#F1F9A1] shrink-0 mr-3" />
+        <div className="flex shrink-0 items-center px-4 py-3.5 border-b border-[rgba(218,241,222,0.08)] bg-[#07100F]/70">
+          {activeMode === 'ASSISTENTE' ? (
+            <Sparkles className="w-4 h-4 text-[#F1F9A1] shrink-0 mr-3" />
           ) : (
             <Search className="w-4 h-4 text-[#8EB69B] shrink-0 mr-3" />
           )}
@@ -185,53 +189,84 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
           <input
             type="text"
             placeholder={
-              activeMode === 'AÇÃO'
-                ? 'Digite a ação... Ex: "João pagou 2 mil", "Crie uma tarefa para amanhã"'
-                : 'Buscar por lead, cliente, prospect, serviço, proposta...'
+              activeMode === 'ASSISTENTE'
+                ? 'Ex: Encontre o lead pelo telefone (68) 99999-0000'
+                : 'Buscar por nome, telefone, e-mail ou empresa...'
             }
+            aria-label={activeMode === 'ASSISTENTE' ? 'Mensagem para o Assistente' : 'Buscar no CRM'}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                if (activeMode === 'AÇÃO') handleExecuteActionInline();
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                void handleExecuteActionInline();
               }
             }}
             autoFocus
-            className="w-full bg-transparent text-[#E7ECE8] placeholder-[#65706A] text-sm focus:outline-none font-sans"
+            className="w-full min-w-0 bg-transparent text-[#E7ECE8] placeholder-[#9BA6A0] text-sm focus:outline-none font-sans"
           />
           <button
+            onClick={() => void handleExecuteActionInline()}
+            disabled={isExecuting || !query.trim()}
+            aria-label="Enviar para o Assistente"
+            className="ml-2 shrink-0 p-2 rounded-lg bg-[#163832] text-[#F1F9A1] hover:bg-[#235347] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#F1F9A1]"
+          >
+            {isExecuting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+          </button>
+          <button
             onClick={onClose}
-            className="text-[#65706A] hover:text-[#E7ECE8] p-1 rounded-lg"
+            aria-label="Fechar busca e Assistente"
+            className="text-[#9BA6A0] hover:text-[#E7ECE8] ml-2 p-1 rounded-lg"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Lista de Resultados conforme o Modo */}
-        <div className="max-h-[60vh] overflow-y-auto p-3 space-y-4">
+        <div className="min-h-0 max-h-[60dvh] overflow-y-auto p-3 space-y-4">
 
-          {/* MODO AÇÃO */}
-          {activeMode === 'AÇÃO' && (
-            <div className="p-4 rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.08)] space-y-3">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-heading text-xs font-semibold text-[#F1F9A1] flex items-center gap-1.5">
-                  <Zap className="w-3.5 h-3.5" />
-                  Comando de Ação Identificado
-                </span>
-                <span className="text-[10px] font-mono text-[#8EB69B]">Permissão WRITE</span>
+          {activeMode === 'ASSISTENTE' && (
+            <div className="space-y-4 p-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#9BA6A0]">
+                <span>{isCheckingAi ? 'Verificando conexão com a IA...' : providerReady ? `${aiConfig.activeProvider === 'gemini' ? 'Gemini' : 'Claude'} conectado` : 'Consultas do CRM disponíveis. Configure a IA para análises.'}</span>
+                <Link href="/configuracoes" onClick={onClose} className="text-[#F1F9A1] underline underline-offset-4 hover:text-white">Configurar IA</Link>
               </div>
-              <p className="text-xs text-[#9BA6A0] leading-relaxed">
-                Comando: &quot;{query}&quot;. A ação será validada pela camada de inteligência e registrada em <code className="text-[#8EB69B]">ai_action_logs</code>.
-              </p>
-              <div className="flex items-center gap-3 pt-1">
-                <button
-                  onClick={handleExecuteActionInline}
-                  className="px-3 py-1.5 rounded-lg bg-[#163832] hover:bg-[#235347] border border-[#8EB69B]/30 text-xs font-heading text-[#F1F9A1] flex items-center gap-1.5 transition-colors"
-                >
-                  <span>Executar Ação Agora</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
+              {!result && !isExecuting && (
+                <div className="py-5 space-y-3">
+                  <p className="text-sm text-[#E7ECE8]">O que você quer encontrar no CRM?</p>
+                  <p className="text-xs text-[#9BA6A0] leading-relaxed">Peça um lead pelo telefone, nome ou e-mail, consulte as metas ou faça uma pergunta sobre os dados do CRM.</p>
+                  <button onClick={() => setQuery('Encontre o lead pelo telefone ')} className="text-xs text-[#F1F9A1] underline underline-offset-4">Buscar um lead pelo telefone</button>
+                </div>
+              )}
+              {(result || isExecuting) && (
+                <div className="space-y-3" aria-live="polite" aria-busy={isExecuting}>
+                  <p className="text-xs text-[#9BA6A0] break-words">{submittedQuery}</p>
+                  {isExecuting ? (
+                    <div role="status" className="flex items-center gap-2 py-4 text-sm text-[#DAF1DE]"><Loader2 className="w-4 h-4 animate-spin" />Consultando os dados do CRM...</div>
+                  ) : result && (
+                    <>
+                      <div role={result.success ? 'status' : 'alert'} className={`flex items-start gap-2 text-sm leading-relaxed ${result.success ? 'text-[#E7ECE8]' : 'text-red-200'}`}>
+                        {result.success ? <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-[#8EB69B]" /> : <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />}
+                        <p className="whitespace-pre-wrap break-words">{result.confirmationMessage || result.message}</p>
+                      </div>
+                      {resultLeads.length > 0 && (
+                        <div className="divide-y divide-[rgba(218,241,222,0.08)]">
+                          {resultLeads.map((lead) => (
+                            <Link key={lead.id} href={`/leads/${lead.id}`} onClick={onClose} className="flex items-center justify-between gap-3 p-3 rounded-lg hover:bg-[#10201E] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#F1F9A1]">
+                              <div className="min-w-0 space-y-1">
+                                <p className="text-sm text-[#E7ECE8] font-medium break-words">{lead.company_name || lead.name}</p>
+                                <p className="text-xs text-[#9BA6A0] break-words">{[lead.name, lead.whatsapp || lead.phone, lead.email].filter(Boolean).join(' · ')}</p>
+                              </div>
+                              <ArrowRight className="w-4 h-4 text-[#F1F9A1] shrink-0" />
+                            </Link>
+                          ))}
+                        </div>
+                      )}
+                      {result.source.length > 0 && <p className="text-[11px] text-[#9BA6A0]">Fonte: {result.source.join(' · ')}</p>}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -390,7 +425,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
                 filteredOpportunities.length === 0 &&
                 filteredServices.length === 0 && (
                   <div className="p-8 text-center text-xs text-[#65706A]">
-                    Nenhum resultado encontrado para &quot;{query}&quot;. Tente uma pergunta (&quot;Como está nossa conversão?&quot;) ou ação (&quot;João pagou 2 mil&quot;).
+                    Nenhum resultado encontrado para &quot;{query}&quot;. Use a aba Assistente ou pressione Enter para consultar o CRM.
                   </div>
                 )}
             </>

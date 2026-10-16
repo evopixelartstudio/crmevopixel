@@ -20,6 +20,7 @@ let insertCalls = 0;
 const rows = new Map();
 const dbService = new Proxy({}, { get: (_, key) => async (...args) => {
   if (key === 'getClients') return remoteClients;
+  if (key === 'insertLead') return args[0];
   if (key === 'insertClient') {
     insertCalls++;
     if (pendingInsert) return pendingInsert;
@@ -125,7 +126,7 @@ test('automatic history synchronization queues writes, keeps one client and retr
 });
 
 test('closing a pipeline opportunity creates one confirmed client and enriches its contacts', async () => {
-  const lead = crmService.addLead({ name: 'Contato do pipeline', company_name: 'Empresa do pipeline',
+  const lead = await crmService.addLead({ name: 'Contato do pipeline', company_name: 'Empresa do pipeline',
     segment: 'Tecnologia', email: 'contato@example.test', whatsapp: '11999999999', status: 'em_contato' });
   const opportunity = crmService.addOpportunity({ lead_id: lead.id, lead_name: lead.name, company_name: lead.company_name,
     stage_slug: 'primeiro_contato', title: 'Site', estimated_value: 1000, probability: 0,

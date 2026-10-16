@@ -6,10 +6,14 @@ import * as xlsx from 'xlsx';
 import { crmService } from '@/lib/services/crm-service';
 import { parseSpreadsheetLeads } from '@/lib/services/spreadsheet-leads';
 import { useCrmSync } from '@/lib/hooks/useCrmSync';
-import { Lead, Temperature } from '@/types/database';
+import { Lead } from '@/types/database';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
+import { LeadRegistrationFields } from '@/components/leads/LeadRegistrationFields';
+import { LeadDuplicateNotice, LeadImportSummary } from '@/components/leads/LeadDuplicateNotice';
+import { getLeadRegistrationInput, getLeadRegistrationValues } from '@/lib/services/lead-registration';
+import { LeadDuplicateError, type LeadDuplicate, type LeadImportResult } from '@/lib/services/lead-deduplication';
 import {
   Users,
   Search,
@@ -18,21 +22,16 @@ import {
   Trash2,
   CheckSquare,
   Square,
-  MessageSquare,
   Upload,
   FileSpreadsheet,
-  CheckCircle2,
   CloudDownload,
   Instagram,
-  Mail,
   MapPin,
-  Globe,
   Kanban,
 } from 'lucide-react';
 import { WhatsAppIcon } from '@/components/ui/WhatsAppIcon';
 import { openWhatsApp, cleanPhoneNumber } from '@/lib/utils/whatsapp';
 import { openInstagramProfile, openGoogleMapsProfile } from '@/lib/utils/social-links';
-import { formatPhoneNumber } from '@/lib/utils';
 import { GenerateMessageModal, TargetEntity } from '@/components/modals/GenerateMessageModal';
 import { qualifyLeadWithAI } from '@/lib/ai/qualification';
 import { aiProvider } from '@/lib/ai/ai-provider';
@@ -49,7 +48,8 @@ export default function LeadsPage() {
   // Import states
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  const [importStats, setImportStats] = useState<{ total: number; count: number } | null>(null);
+  const [importStats, setImportStats] = useState<(LeadImportResult & { sourceTotal: number }) | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   // Apify capture states
   const [isApifyModalOpen, setIsApifyModalOpen] = useState(false);
@@ -58,6 +58,7 @@ export default function LeadsPage() {
   const [apifyToken, setApifyToken] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractionLog, setExtractionLog] = useState('');
+  const [extractionResult, setExtractionResult] = useState<LeadImportResult | null>(null);
 
   // Multi-selection states
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
@@ -66,24 +67,21 @@ export default function LeadsPage() {
   const [messageTarget, setMessageTarget] = useState<TargetEntity | null>(null);
 
   // Form states - Novo Lead
-  const [newName, setNewName] = useState('');
-  const [newCompany, setNewCompany] = useState('');
-  const [newSegment, setNewSegment] = useState('Contabilidade');
-  const [newWhatsapp, setNewWhatsapp] = useState('');
-  const [newCity, setNewCity] = useState('');
-  const [newEmail, setNewEmail] = useState('');
-  const [newInstagram, setNewInstagram] = useState('');
-  const [newGoogleBusiness, setNewGoogleBusiness] = useState('');
+  const [newLeadValues, setNewLeadValues] = useState(getLeadRegistrationValues);
+  const [isSavingLead, setIsSavingLead] = useState(false);
+  const [newLeadError, setNewLeadError] = useState<string | null>(null);
+  const [newLeadDuplicates, setNewLeadDuplicates] = useState<LeadDuplicate[]>([]);
 
   const niches = crmService.getNiches();
 
   // Importação e qualificação via Planilha (CSV / XLSX)
   const handleSpreadsheetUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || isImporting) return;
     e.target.value = '';
 
     setIsImporting(true);
+    setImportError(null);
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
@@ -98,26 +96,27 @@ export default function LeadsPage() {
           throw new Error('A planilha não contém linhas preenchidas para importar. Nenhum campo é obrigatório.');
         }
 
-        await crmService.addLeads(leadsParaSalvar);
-        setImportStats({ total: jsonData.length, count: leadsParaSalvar.length });
+        const result = await crmService.addLeads(leadsParaSalvar);
+        setImportStats({ ...result, sourceTotal: jsonData.length });
       } catch (err) {
         console.error(err);
-        alert(err instanceof Error ? err.message : 'Não foi possível ler a planilha. Tente novamente.');
+        setImportError(err instanceof Error ? err.message : 'Não foi possível importar a planilha. Tente novamente.');
       } finally {
         setIsImporting(false);
       }
     };
     reader.onerror = () => {
       setIsImporting(false);
-      alert('Não foi possível ler o arquivo selecionado. Tente selecioná-lo novamente.');
+      setImportError('Não foi possível ler o arquivo selecionado. Tente selecioná-lo novamente.');
     };
     reader.readAsArrayBuffer(file);
   };
 
   // Captação via Apify + Qualificação por IA
   const handleApifyCapture = async () => {
-    if (!apifyNiche || !apifyCity) return;
+    if (isExtracting || !apifyNiche || !apifyCity) return;
     setIsExtracting(true);
+    setExtractionResult(null);
     setExtractionLog('Iniciando captação...');
 
     try {
@@ -201,9 +200,8 @@ export default function LeadsPage() {
 
       setExtractionLog(`Foram extraídos ${extractedLeads.length} contatos. IA gerando scores, qualificação e abordagem...`);
 
-      let count = 0;
-      extractedLeads.forEach((leadItem) => {
-        const qualified = qualifyLeadWithAI({
+      const qualifiedLeads = extractedLeads.map((leadItem) =>
+        qualifyLeadWithAI({
           name: leadItem.nome,
           company_name: leadItem.empresa,
           phone: leadItem.telefone,
@@ -214,50 +212,38 @@ export default function LeadsPage() {
           instagram: leadItem.instagram,
           google_business: leadItem.google_business,
           role: 'Decisor Comercial',
-        });
-        crmService.addLead(qualified);
-        count++;
-      });
-
-      setExtractionLog(`Sucesso! ${count} leads qualificados com nota, score e mensagem prontos para WhatsApp!`);
-      setTimeout(() => {
-        setIsExtracting(false);
-        setIsApifyModalOpen(false);
-        setExtractionLog('');
-      }, 2000);
+        })
+      );
+      setExtractionLog('Verificando telefones já cadastrados e salvando os novos contatos...');
+      const result = await crmService.addLeads(qualifiedLeads);
+      setExtractionResult(result);
+      setExtractionLog('');
     } catch (error: any) {
       setExtractionLog(`Erro: ${error?.message || 'Falha na extração ou classificação IA.'}`);
+    } finally {
       setIsExtracting(false);
     }
   };
 
   // Criação manual de lead
-  const handleCreateLead = (e: React.FormEvent) => {
+  const handleCreateLead = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingLead) return;
+    setIsSavingLead(true);
+    setNewLeadError(null);
+    setNewLeadDuplicates([]);
 
-    const qualified = qualifyLeadWithAI({
-      name: newName.trim() || newCompany.trim() || 'Contato não informado',
-      company_name: newCompany.trim() || 'Empresa não informada',
-      segment: newSegment,
-      city: newCity.trim(),
-      whatsapp: newWhatsapp.trim(),
-      phone: newWhatsapp.trim(),
-      email: newEmail.trim(),
-      instagram: newInstagram.trim(),
-      google_business: newGoogleBusiness.trim(),
-    });
-
-    crmService.addLead(qualified);
-
-    // Limpar campos
-    setNewName('');
-    setNewCompany('');
-    setNewWhatsapp('');
-    setNewCity('');
-    setNewEmail('');
-    setNewInstagram('');
-    setNewGoogleBusiness('');
-    setIsNewLeadModalOpen(false);
+    try {
+      const qualified = qualifyLeadWithAI(getLeadRegistrationInput(newLeadValues));
+      await crmService.addLead(qualified);
+      setNewLeadValues(getLeadRegistrationValues({ segment: newLeadValues.segment }));
+      setIsNewLeadModalOpen(false);
+    } catch (error) {
+      if (error instanceof LeadDuplicateError && error.duplicates.length) setNewLeadDuplicates(error.duplicates);
+      else setNewLeadError(error instanceof Error ? error.message : 'Não foi possível salvar o lead. Tente novamente.');
+    } finally {
+      setIsSavingLead(false);
+    }
   };
 
   const handleDeleteLead = (id: string, e: React.MouseEvent) => {
@@ -418,7 +404,11 @@ export default function LeadsPage() {
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Botão Captar via Apify + IA (Anexo da imagem 3) */}
           <button
-            onClick={() => setIsApifyModalOpen(true)}
+            onClick={() => {
+              setExtractionResult(null);
+              setExtractionLog('');
+              setIsApifyModalOpen(true);
+            }}
             className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-500/20 to-emerald-500/20 hover:from-blue-500/30 hover:to-emerald-500/30 border border-blue-400/30 text-blue-300 hover:text-white text-xs font-heading font-medium flex items-center gap-2 transition-all active:scale-95 shadow-sm"
             title="Extrair contatos locais via Google Maps com Apify e classificar por IA"
           >
@@ -428,7 +418,10 @@ export default function LeadsPage() {
 
           {/* Botão Importar Planilha */}
           <button
-            onClick={() => setIsImportModalOpen(true)}
+            onClick={() => {
+              setImportError(null);
+              setIsImportModalOpen(true);
+            }}
             className="px-3.5 py-2 rounded-xl bg-[#10201E] hover:bg-[#163832] border border-[rgba(218,241,222,0.12)] text-[#8EB69B] hover:text-[#F1F9A1] text-xs font-heading font-medium flex items-center gap-1.5 transition-all active:scale-95"
             title="Importar lista de leads (CSV ou XLSX) com qualificação IA automática"
           >
@@ -438,7 +431,11 @@ export default function LeadsPage() {
 
           {/* Botão Novo Lead */}
           <Button
-            onClick={() => setIsNewLeadModalOpen(true)}
+            onClick={() => {
+              setNewLeadError(null);
+              setNewLeadDuplicates([]);
+              setIsNewLeadModalOpen(true);
+            }}
             variant="primary"
             size="sm"
             className="gap-1.5"
@@ -719,111 +716,16 @@ export default function LeadsPage() {
       {/* Modal Cadastrar Novo Lead (com Instagram, E-mail e Google Meu Negócio) */}
       <Modal
         isOpen={isNewLeadModalOpen}
-        onClose={() => setIsNewLeadModalOpen(false)}
+        onClose={() => !isSavingLead && setIsNewLeadModalOpen(false)}
         title="Cadastrar Novo Lead"
         subtitle="Preencha os dados do lead para classificação e vinculação à sequência de nicho."
         maxWidth="md"
       >
         <form onSubmit={handleCreateLead} className="space-y-4 text-xs">
-          <div>
-            <label className="block text-[#9BA6A0] mb-1 font-medium">Nome do Contato</label>
-            <input
-              type="text"
-              placeholder="Ex: Dr. Roberto Silva"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#65706A] focus:outline-none focus:border-[#8EB69B]"
-            />
-          </div>
-
-          <div>
-            <label className="block text-[#9BA6A0] mb-1 font-medium">Empresa / Razão Social</label>
-            <input
-              type="text"
-              placeholder="Ex: Silva Odontologia Integrada"
-              value={newCompany}
-              onChange={(e) => setNewCompany(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#65706A] focus:outline-none focus:border-[#8EB69B]"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Segmento / Nicho</label>
-              <select
-                value={newSegment}
-                onChange={(e) => setNewSegment(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] focus:outline-none focus:border-[#8EB69B] appearance-none"
-              >
-                {niches.map((n) => (
-                  <option key={n.id} value={n.name}>
-                    {n.name}
-                  </option>
-                ))}
-                <option value="Marmorarias / Marmoristas">Marmorarias / Marmoristas</option>
-                <option value="Geral">Outro / Geral</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Cidade</label>
-              <input
-                type="text"
-                placeholder="Ex: São Paulo"
-                value={newCity}
-                onChange={(e) => setNewCity(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#65706A] focus:outline-none focus:border-[#8EB69B]"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">WhatsApp / Telefone</label>
-              <input
-                type="text"
-                placeholder="(11) 99999-9999"
-                value={newWhatsapp}
-                onChange={(e) => setNewWhatsapp(formatPhoneNumber(e.target.value))}
-                className="w-full px-3 py-2 rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#65706A] focus:outline-none focus:border-[#8EB69B] font-mono text-xs"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">E-mail (opcional)</label>
-              <input
-                type="email"
-                placeholder="contato@empresa.com.br"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#65706A] focus:outline-none focus:border-[#8EB69B] text-xs"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Instagram (opcional)</label>
-              <input
-                type="text"
-                placeholder="@empresa ou link"
-                value={newInstagram}
-                onChange={(e) => setNewInstagram(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#65706A] focus:outline-none focus:border-[#8EB69B] text-xs"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[#9BA6A0] mb-1 font-medium">Google Meu Negócio (opcional)</label>
-              <input
-                type="text"
-                placeholder="Nome ou link no Google Maps"
-                value={newGoogleBusiness}
-                onChange={(e) => setNewGoogleBusiness(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-[#07100F] border border-[rgba(218,241,222,0.08)] text-[#E7ECE8] placeholder-[#65706A] focus:outline-none focus:border-[#8EB69B] text-xs"
-              />
-            </div>
-          </div>
+          <LeadRegistrationFields values={newLeadValues} onChange={setNewLeadValues} niches={niches} disabled={isSavingLead} />
+          <p className="text-[#9BA6A0]">O telefone será conferido em Leads, Pipeline, Clientes e Lixeira antes do cadastro.</p>
+          <LeadDuplicateNotice duplicates={newLeadDuplicates} />
+          {newLeadError && <p role="alert" className="text-red-300">{newLeadError}</p>}
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-[rgba(218,241,222,0.06)]">
             <Button
@@ -831,11 +733,12 @@ export default function LeadsPage() {
               variant="secondary"
               size="sm"
               onClick={() => setIsNewLeadModalOpen(false)}
+              disabled={isSavingLead}
             >
               Cancelar
             </Button>
-            <Button type="submit" variant="primary" size="sm">
-              Criar Lead
+            <Button type="submit" variant="primary" size="sm" disabled={isSavingLead}>
+              {isSavingLead ? 'Verificando e salvando...' : 'Criar Lead'}
             </Button>
           </div>
         </form>
@@ -900,11 +803,12 @@ export default function LeadsPage() {
           </div>
 
           {extractionLog && (
-            <div className="bg-[#10201E] border border-[rgba(218,241,222,0.08)] rounded-xl p-3 text-xs text-[#8EB69B] font-mono">
-              <span className="inline-block w-2 h-2 rounded-full bg-[#F1F9A1] animate-pulse mr-2"></span>
+            <div role="status" className="bg-[#10201E] border border-[rgba(218,241,222,0.08)] rounded-xl p-3 text-xs text-[#8EB69B]">
+              {isExtracting && <span className="inline-block w-2 h-2 rounded-full bg-[#F1F9A1] animate-pulse mr-2" aria-hidden="true"></span>}
               {extractionLog}
             </div>
           )}
+          {extractionResult && <LeadImportSummary result={extractionResult} sourceLabel="contatos captados" />}
 
           <div className="flex justify-end gap-2 pt-3 border-t border-[rgba(218,241,222,0.06)]">
             <Button
@@ -914,7 +818,7 @@ export default function LeadsPage() {
               onClick={() => setIsApifyModalOpen(false)}
               disabled={isExtracting}
             >
-              Cancelar
+              {extractionResult ? 'Concluir e Ver Leads' : 'Cancelar'}
             </Button>
             <Button
               type="button"
@@ -944,13 +848,16 @@ export default function LeadsPage() {
       <Modal
         isOpen={isImportModalOpen}
         onClose={() => {
+          if (isImporting) return;
           setIsImportModalOpen(false);
           setImportStats(null);
+          setImportError(null);
         }}
         title="Importação & Qualificação com IA"
         subtitle="Importe contatos via planilha CSV ou Excel (XLSX). A IA qualifica score, temperatura, nicho e serviços automaticamente."
       >
         <div className="space-y-4 text-xs">
+          {importError && <p role="alert" className="rounded-xl border border-red-400/25 bg-red-400/5 p-3 text-red-200">{importError}</p>}
           {!importStats ? (
             <div className="space-y-3">
               <label className="relative p-8 border-2 border-dashed border-[rgba(218,241,222,0.12)] hover:border-[rgba(218,241,222,0.3)] rounded-2xl flex flex-col items-center justify-center text-center bg-[#10201E]/40 cursor-pointer overflow-hidden transition-all group">
@@ -971,12 +878,14 @@ export default function LeadsPage() {
                   Reconhece colunas: Nome, Empresa, Telefone / WhatsApp, Cidade, Nicho, Email, Instagram e Google Meu Negócio
                 </span>
               </label>
+              <p className="text-[#9BA6A0]">Telefones já cadastrados em Leads, Pipeline, Clientes ou Lixeira serão ignorados, inclusive repetições nesta planilha.</p>
 
               <div className="flex justify-end gap-2 pt-2">
                 <Button
                   variant="secondary"
                   size="sm"
                   onClick={() => setIsImportModalOpen(false)}
+                  disabled={isImporting}
                 >
                   Fechar
                 </Button>
@@ -984,15 +893,7 @@ export default function LeadsPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="p-4 rounded-xl bg-[#10201E] border border-[rgba(218,241,222,0.08)] space-y-2">
-                <div className="flex items-center gap-2 text-xs font-semibold text-[#8EB69B]">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>{importStats.count} leads importados e qualificados com sucesso!</span>
-                </div>
-                <p className="text-[11px] text-[#9BA6A0]">
-                  Foram lidas {importStats.total} linhas da planilha. A Inteligência Artificial avaliou os contatos, calculou scores de 0 a 100, determinou a temperatura (Quente/Morno/Frio) e mapeou as ofertas recomendadas.
-                </p>
-              </div>
+              <LeadImportSummary result={importStats} sourceTotal={importStats.sourceTotal} />
 
               <div className="flex justify-end gap-2 pt-2">
                 <Button
