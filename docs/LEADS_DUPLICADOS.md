@@ -1,5 +1,7 @@
 # Proteção de leads duplicados por telefone
 
+**Produção atualizada em 16/10/2026:** a migração abaixo já foi aplicada no projeto Supabase do CRM, e a revisão `cde87b7c266b` foi publicada na VPS. Os cadastros originais foram preservados e o bloqueio foi confirmado em teste no banco. O procedimento abaixo continua válido para novas instalações e reaplicações.
+
 Antes de publicar o aplicativo atualizado, execute **todo** o arquivo
 [`20261016_lead_phone_deduplication.sql`](../supabase/migrations/20261016_lead_phone_deduplication.sql)
 no SQL Editor do projeto Supabase conectado ao CRM. A migração é reexecutável.

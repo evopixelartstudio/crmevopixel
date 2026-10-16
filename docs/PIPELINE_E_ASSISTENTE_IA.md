@@ -1,6 +1,6 @@
 # Cadastro compartilhado e consultas com IA
 
-As alterações deste documento precisam ser publicadas no servidor para aparecerem no CRM em produção.
+As alterações deste documento foram publicadas no CRM em 16/10/2026, na revisão `cde87b7c266b`. Para outras instalações, publique o código atualizado antes de utilizar as funções.
 
 ## Pipeline
 
